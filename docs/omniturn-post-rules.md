@@ -3,7 +3,10 @@
 Summarised from the OmniTurn Operator and Maintenance Manual (G4 control, 2023 and Sep 2026 editions, available from omniturn.com). Page refs are manual pages. Items marked **VERIFY** couldn't be read cleanly from the PDF text and need a check against the printed pages or on the machine. Items marked **CONFIRMED** were checked by a machinist against the printed manual.
 
 ## Target machine
-The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the OmniTurn G4 control and CNC package**, not a factory OmniTurn GT-75. The control and G-code dialect are the same, but the iron is different. The stock HLV-H spindle runs 125–3000 rpm and takes 5C collets up to 1-1/16" round, and its travels and tool plate layout are its own. Machine-specific limits live in `machine.toml` (see `examples/machine.toml`). Every program header names the machine it was posted for.
+The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the OmniTurn G4 control and CNC package**, not a factory OmniTurn GT-75. The control and G-code dialect are the same, but the iron is different:
+- Spindle on the OmniTurn VFD: 4000 rpm max. 5C collets, 1-1/16" round capacity.
+- Travel: about 10" X and 9" Z (to be confirmed on the machine). The post warns when a program's moves span more than that. It can't do a true limit check, because where the travel sits relative to the part depends on the tool offsets.
+- Control firmware is as shipped, about 5 years old and never updated. The June 2023 manual that came with the control is the reference. The Sep 2026 manual has the same "Codes Honored" list apart from M86 (vision system). Its G33 pages read cleanly and were used to fill in text that is garbled in the 2023 PDF. Where only the 2026 text documents a detail (e.g. `C` alone = 29°), the post avoids relying on it. Machine-specific limits live in `machine.toml` (see `examples/machine.toml`). Every program header names the machine it was posted for.
 
 ## File format
 - Plain text, filename max 8 characters, extension .txt, .cnc, or none (2.8)
@@ -57,7 +60,7 @@ The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the 
   - I = depth of the FIRST pass, 2× depth of cut in diameter mode. The control keeps the material removed per pass constant, so passes ≈ (total depth / I)². Start X = major − I (OD), so the first pass is a full I
   - K = lead. Multi-start: K = lead × starts, one G33 per start, each start's Z offset by the pitch (2.28)
   - A = taper, X travel over the whole Z travel including the run-up; the start X must be corrected for the taper (2.29)
-  - C = angle infeed; `c` alone = 29°, `c27` = 27°, range 0–30°
+  - C = angle infeed; `c` alone = 29° (2026 manual), `c27` = 27°, range 0–30°. The post always writes the angle explicitly
   - P = keep moving forward in Z while pulling out (no undercut); overshoots Z by as much as the X retract
   - O = single pass at finished depth; pulls out to 3×I. To re-pick a thread: part not moved in the collet, same start X and Z, same spindle speed, same P/C
   - Retracts between passes to start + 2×I; returns to the start point at the end
@@ -65,7 +68,7 @@ The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the 
 - "Do-it-yourself" threading / thread milling: `p` alone at the end of any move starts it in sync with the spindle, e.g. `z-.25p` (2.30, CONFIRMED)
 
 ## Taps and dies
-- G84, G86 and G89 are **not** in the G4 "Codes Honored" list (p2.1–2.2). The manual's tapping method (p2.58) uses ordinary moves and needs a floating or self-releasing holder: `g95f(pitch × .95)z(depth)` → `m04` → `g04f(dwell)` → feed out → `m03`. omniturn-cam uses this for taps, solid die holders and acorn dies.
+- G84, G86 and G89 are **not** in the G4 "Codes Honored" list (p2.1–2.2), CONFIRMED on the machine: tapping and die cycles are written out long-hand. The manual's tapping method (p2.58) uses ordinary moves and needs a floating or self-releasing holder: `g95f(pitch × .95)z(depth)` → `m04` → `g04f(dwell)` → feed out → `m03`. omniturn-cam uses this for taps, solid die holders and acorn dies.
 - Releasing die heads (geometric): feed at the pitch, spindle-synced (P), to the trip point → short dwell → rapid out → `m05` → `m01` so the operator can reset the head. M01 only stops if optional stop is switched ON at the control ("O" in Automatic mode, p2.53); use M00 if the stop must always happen.
 
 ## Subroutines (2.55; "Using External Sub-routines", Dec 2024)

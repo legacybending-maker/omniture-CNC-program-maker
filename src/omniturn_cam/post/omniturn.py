@@ -27,7 +27,9 @@ class MachineConfig:
     tool_call_z: float = 1.0           # safe Z for tool calls and between tools
     z_clear: float = 0.05              # approach clearance in front of features
     x_clear: float = 0.05              # radial clearance over stock (added on diameter x2)
-    max_rpm: float = 3000.0            # HLV-H stock spindle: 125-3000 rpm. VERIFY after retrofit
+    max_rpm: float = 4000.0            # HLV-H on the OmniTurn VFD
+    x_travel: float | None = 10.0      # slide travel, inch (radial). VERIFY on the machine
+    z_travel: float | None = 9.0       # slide travel, inch. VERIFY on the machine
     max_bar: float | None = 1.0625     # 5C round collet capacity (inch); None = no check
     decimals: int = 4                  # .0001 on diameter in G72 (manual p2.6)
     feed_decimals: int = 5
@@ -48,7 +50,8 @@ class MachineConfig:
     def for_units(cls, units: str, overrides: dict | None = None) -> "MachineConfig":
         if units == "metric":
             m = cls(units="metric", rapid_feed=7620.0, tool_call_z=25.0, z_clear=1.0,
-                    x_clear=1.0, decimals=3, feed_decimals=3, max_bar=27.0)
+                    x_clear=1.0, decimals=3, feed_decimals=3, max_bar=27.0,
+                    x_travel=254.0, z_travel=228.6)
         else:
             m = cls()
         for k, v in (overrides or {}).items():
@@ -115,6 +118,25 @@ class OmniTurnPost:
 
     def f(self, v: float) -> str:
         return fmt(v, self.m.feed_decimals)
+
+    def check_travel(self, code: str) -> None:
+        """Warn when the program's moves span more than the slide can travel. This only
+        catches gross problems: where the travel sits relative to the part depends on
+        the tool offsets, which the post doesn't know."""
+        from ..backplot import interpret
+        pts = [q for path in interpret(code, self.m.arc_codes) for q in path.points()
+               if q[0] is not None and q[1] is not None]
+        if not pts:
+            return
+        zs = [q[0] for q in pts]
+        xs = [q[1] for q in pts]
+        z_span = max(zs) - min(zs)
+        x_span = (max(xs) - min(xs)) / 2          # diameter -> slide travel
+        if self.m.z_travel and z_span > self.m.z_travel:
+            self.warn(f"program moves {z_span:.3f} in Z but the {self.m.name} has {self.m.z_travel:g} of Z travel")
+        if self.m.x_travel and x_span > self.m.x_travel:
+            self.warn(f"program moves {x_span:.3f} in X (radial) but the {self.m.name} has "
+                      f"{self.m.x_travel:g} of X travel")
 
     def next_sub(self) -> int:
         taken = set(self.subs.values()) | set(self.external_nums)
@@ -496,7 +518,9 @@ class OmniTurnPost:
         if op.pullout:
             tail += "p"
         if op.infeed_angle is not None:
-            tail += "c" if abs(op.infeed_angle - 29) < 1e-9 else f"c{fmt(op.infeed_angle, 2)}"
+            # Always write the angle: "c" alone = 29 deg is only legible in the 2026 manual,
+            # and an explicit value is valid on every version (manual: "add C27").
+            tail += f"c{fmt(op.infeed_angle, 2)}"
         for s_i in range(op.starts):
             zs = z0 + s_i * plan["pitch"]
             self.rapid(x=clear_x)
@@ -632,6 +656,7 @@ def post(job: Job, machine: MachineConfig | None = None, check: bool = True,
         machine = MachineConfig.for_units(job.units, {k: getattr(machine, k) for k in ("name", "max_rpm")})
     p = OmniTurnPost(job, machine)
     code = p.run()
+    p.check_travel(code)
     if warnings is not None:
         warnings.extend(p.warnings)
     if check:

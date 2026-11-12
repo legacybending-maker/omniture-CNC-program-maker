@@ -100,8 +100,8 @@ pytest
 
 Please open an issue with what your machine does:
 
-- Whether your control accepts G84/G86/G89. They aren't in the G4 manual's code list,
-  so taps and dies are programmed with plain moves, as the manual shows
+- X and Z travel for your machine (set `x_travel` / `z_travel` in machine.toml)
+- G33 on firmware older than the 2023 manual
 
 ## License
 

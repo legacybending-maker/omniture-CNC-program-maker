@@ -166,12 +166,23 @@ def test_g74_box_rough_always_carries_u(lib):
 
 
 def test_machine_name_in_header_and_rpm_warning(lib, tmp_path):
-    (tmp_path / "m.toml").write_text('name = "Hardinge HLV-H OmniTurn G4"\nmax_rpm = 3000\n[inch]\nmax_bar = 1.0625\n')
+    (tmp_path / "m.toml").write_text('name = "Hardinge HLV-H OmniTurn G4"\nmax_rpm = 4000\n[inch]\nmax_bar = 1.0625\n')
     m = MachineConfig.load(tmp_path / "m.toml", "inch")
     warns = []
-    code = post(_job_with(lib, (2, "drill-250"), ops=[Drill(t=2, rpm=3500, z=-0.3)]), m, warnings=warns)
+    code = post(_job_with(lib, (2, "drill-250"), ops=[Drill(t=2, rpm=4500, z=-0.3)]), m, warnings=warns)
     assert "(HARDINGE HLV H OMNITURN G4)" in code
-    assert any("3500" in w for w in warns)
+    assert any("4500" in w for w in warns)
+
+
+def test_default_machine_is_hlvh_on_vfd():
+    m = MachineConfig()
+    assert m.max_rpm == 4000 and m.x_travel == 10 and m.z_travel == 9
+
+
+def test_travel_warning(lib):
+    warns = []
+    post(_job_with(lib, (2, "drill-250"), ops=[Drill(t=2, rpm=2000, z=-9.5)]), warnings=warns)
+    assert any("Z travel" in w for w in warns)
 
 
 # --------------------------------------------------------------------- G33 threading (manual p2.23-2.29)
@@ -207,7 +218,7 @@ def test_g33_spring_pass_angle_infeed_and_lint(lib):
     op = Thread(t=4, rpm=500, major=0.5, minor=0.424, z_end=-0.5, lead=0.05, first_depth=0.008,
                 pullout=True, infeed_angle=29, spring_passes=1)
     code = post(_thread_job(lib, op))
-    assert "g33x.424z-.5i.008k.05pc\ng33x.424z-.5i.008k.05pco" in code
+    assert "g33x.424z-.5i.008k.05pc29\ng33x.424z-.5i.008k.05pc29o" in code
     assert not [p for p in lint(code) if p.severity == "error"]
     op.infeed_angle = 27
     assert "k.05pc27" in post(_thread_job(lib, op))
@@ -226,7 +237,7 @@ def test_g33_internal_thread_starts_inside(lib):
     op = Thread(t=4, rpm=400, side="id", major=0.9375, minor=0.8783, z_end=-0.75, lead=0.05,
                 first_depth=0.01, infeed_angle=29)
     code = post(_thread_job(lib, op))
-    assert "g33x.9375z-.75i.01k.05c" in code and "\nx.8883\n" in code
+    assert "g33x.9375z-.75i.01k.05c29" in code and "\nx.8883\n" in code
 
 
 # --------------------------------------------------------------------- external subroutines, M98, raw code
