@@ -37,7 +37,7 @@ converts them to the OmniTurn's G02/G03, whose X axis points down.
 | 1 | Profile model, OmniTurn post, rules linter, backplot, tool library, TOML jobs | **working** |
 | 2 | Fill-in-the-blank GUI (Okuma IGF style), tool library editor | **working** |
 | 2b | Drawing STEP/DXF tool models in the backplot | planned |
-| 3 | STEP import: find the turning axis, cut the half-section, build the profile | planned |
+| 3 | STEP import: find the turning axis, cut the half-section, build OD and ID shapes | **working** |
 | 4 | G33 threading (single/multi-start, angle infeed, pull-out, spring passes) | **working** |
 | 5 | Collision checks against tool models, travel limits | planned |
 
@@ -47,7 +47,7 @@ converts them to the OmniTurn's G02/G03, whose X axis points down.
 git clone https://github.com/legacybending-maker/omniture-CNC-program-maker
 cd omniture-CNC-program-maker
 python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[gui,dev]"
+pip install -e ".[all,dev]"          # GUI + STEP import (OpenCascade) + tests
 omniturn-cam-gui                      # or: omniturn-cam gui examples/manual_g75.toml
 ```
 
@@ -77,6 +77,36 @@ spindle-synced axial pass at .05 IPR.
 
 Your tool library lives in `~/.config/omniturn-cam/tools.toml`. A starter
 library is copied there the first time the program runs.
+
+## Importing a STEP file
+
+On **F2 Part Shape**, press **Import from STEP…** and pick the file.
+
+1. If the file has several solids (an assembly), choose one. You can also
+   break a single part out of an assembly in FreeCAD and export just that
+   body (File → Export → STEP).
+2. The turning axis is found automatically, however the part sits in the
+   model.
+3. Check which end is the face (Z0) in the preview. Press **Flip** if it's
+   the wrong end.
+4. The OD becomes the shape `od`, and any bore or drilled hole becomes `id`.
+   The OD is run out to the bar diameter at the back so G75/G78 have a
+   closed area to rough. If the part is bigger than the bar set on F1, the
+   bar size can be updated in the same step.
+
+Flats, cross holes, hex and other features that aren't turned are listed
+as notes. The shape is taken from the cut where the part is fullest, so
+those features need their own operations. Fillets and arcs come in as arcs.
+Chamfers come in as plain lines, not C words; the program is the same.
+
+![STEP import](docs/screenshots/2-step-import.png)
+
+From the command line:
+
+```bash
+omniturn-cam step part.step --flip --stock 0.75              # prints the shapes as TOML
+omniturn-cam step part.step --flip --into myjob.toml         # adds them to a job file
+```
 
 ## Command line
 

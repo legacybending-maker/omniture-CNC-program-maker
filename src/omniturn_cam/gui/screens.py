@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFormLayout, QGroupBox,
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
                                QScrollArea, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
@@ -215,8 +215,8 @@ class ShapeScreen(Screen):
         top.addWidget(self.sz)
         top.addStretch(1)
         b = QPushButton("Import from STEP…")
-        b.setEnabled(False)
-        b.setToolTip("Phase 3: pick a STEP file and the shape is cut from the model")
+        b.setToolTip("Pick a STEP file of a turned part; its OD and bore become shapes")
+        b.clicked.connect(self._import_step)
         top.addWidget(b)
         lay.addLayout(top)
 
@@ -365,6 +365,23 @@ class ShapeScreen(Screen):
 
     def _side(self, _s):
         self._rebuild()
+
+    def _import_step(self):
+        start = self.win.settings.value("step_dir", str(Path.home()))
+        path, _ = QFileDialog.getOpenFileName(self, "Import from STEP", start, "STEP files (*.step *.stp *.STEP *.STP)")
+        if not path:
+            return
+        self.win.settings.setValue("step_dir", str(Path(path).parent))
+        try:
+            from .stepdialog import StepImportDialog
+            dlg = StepImportDialog(path, self.job, self)
+        except Exception as e:   # missing OCP, unreadable file
+            QMessageBox.critical(self, "Import from STEP", str(e))
+            return
+        if dlg.exec() == QDialog.Accepted and dlg.result is not None:
+            names = dlg.apply()
+            self.win.touched()
+            self.refresh(select=names[0])
 
     def _new(self):
         name, ok = QInputDialog.getText(self, "New shape", "Shape name (e.g. od, bore):")

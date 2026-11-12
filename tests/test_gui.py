@@ -88,3 +88,18 @@ def test_die_head_process_prefills_from_tool(win):
     from omniturn_cam.fields import new_operation
     op = new_operation("axial", 3, win.library["die-head-1-2-20"])
     assert op.sync is True and op.feed == 0.05
+
+
+def test_step_import_dialog_fills_shapes(win, tmp_path):
+    pytest.importorskip("OCP")
+    import stepparts as sp
+    from omniturn_cam.gui.stepdialog import StepImportDialog
+    path = sp.write(tmp_path / "bush.step", sp.bushing())
+    win.job.stock.diameter = 0.75
+    dlg = StepImportDialog(str(path), win.job, win)
+    dlg.flip.setChecked(True)
+    assert dlg.result is not None and dlg.result.id is not None
+    assert dlg.set_stock.isChecked()          # part is bigger than the bar
+    dlg.apply()
+    assert win.job.stock.diameter == 1.0
+    assert set(win.job.profiles) >= {"od", "id"} and win.job.profiles["id"].side == "id"

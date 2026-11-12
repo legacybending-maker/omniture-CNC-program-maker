@@ -15,6 +15,7 @@ dependencies = ["tomli-w>=1.0"]
 plot = ["matplotlib>=3.7"]
 gui = ["PySide6-Essentials>=6.5", "matplotlib>=3.7"]
 step = ["cadquery-ocp>=7.7"]
+all = ["PySide6-Essentials>=6.5", "matplotlib>=3.7", "cadquery-ocp>=7.7"]
 dev = ["pytest>=7", "matplotlib>=3.7"]
 
 [project.scripts]
@@ -28,7 +29,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 
 [tool.setuptools.package-data]
 omniturn_cam = ["data/*.toml"]

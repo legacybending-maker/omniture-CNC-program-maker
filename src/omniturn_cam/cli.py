@@ -4,11 +4,13 @@
   omniturn-cam lint PROGRAM.cnc
   omniturn-cam plot PROGRAM.cnc OUT.png
   omniturn-cam gui [JOB.toml]
+  omniturn-cam step PART.step [--flip] [--stock DIA] [--into JOB.toml]
 """
 from __future__ import annotations
 
 import argparse
 import sys
+import tomllib
 from pathlib import Path
 
 from .job import load_job
@@ -41,7 +43,18 @@ def main(argv=None) -> int:
     g = sub.add_parser("gui", help="open the fill-in-the-blank programming screens")
     g.add_argument("job", nargs="?")
 
+    st = sub.add_parser("step", help="import OD/ID shapes from a STEP file")
+    st.add_argument("step")
+    st.add_argument("--solid", type=int, help="solid number when the file has several (1, 2, ...)")
+    st.add_argument("--flip", action="store_true", help="put Z0 at the other end of the part")
+    st.add_argument("--units", choices=["inch", "metric"], default="inch")
+    st.add_argument("--stock", type=float, help="bar diameter: extend the OD shape out to it")
+    st.add_argument("--into", help="add the shapes to this job file (replacing shapes with the same names)")
+
     a = ap.parse_args(argv)
+
+    if a.cmd == "step":
+        return _step(a)
 
     if a.cmd == "gui":
         from .gui.app import main as gui_main
@@ -86,6 +99,40 @@ def main(argv=None) -> int:
         plot(Path(a.program).read_text(), a.png)
         return 0
     return 1
+
+
+def _step(a) -> int:
+    import tomli_w
+
+    from .job import profile_to_dict
+    from .stepimport import StepImportError, extend_to_stock, import_step, read_solids
+    try:
+        if a.solid is None:
+            solids = read_solids(a.step)
+            if len(solids) > 1:
+                print(f"{a.step} has {len(solids)} solids - pick one with --solid N:", file=sys.stderr)
+                for s in solids:
+                    dims = " x ".join(f"{v:.1f}" for v in s.size)
+                    print(f"  {s.index + 1}: {s.name}  {dims} mm  volume {s.volume:.0f} mm3", file=sys.stderr)
+                return 2
+        r = import_step(a.step, None if a.solid is None else a.solid - 1, a.units, a.flip)
+    except StepImportError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    for w in r.warnings:
+        print(f"warning: {w}", file=sys.stderr)
+    stock = a.stock or r.max_dia
+    extend_to_stock(r.od, stock)
+    profiles = {"od": r.od} | ({"id": r.id} if r.id else {})
+    print(f"# {Path(a.step).name}: {r.max_dia:g} max dia x {r.length:g} long ({a.units})", file=sys.stderr)
+    if a.into:
+        data = tomllib.loads(Path(a.into).read_text())
+        data.setdefault("profile", {}).update({k: profile_to_dict(v) for k, v in profiles.items()})
+        Path(a.into).write_text("# omniturn-cam job file\n" + tomli_w.dumps(data))
+        print(f"added {', '.join(profiles)} to {a.into}", file=sys.stderr)
+    else:
+        sys.stdout.write(tomli_w.dumps({"profile": {k: profile_to_dict(v) for k, v in profiles.items()}}))
+    return 0
 
 
 if __name__ == "__main__":
