@@ -123,3 +123,52 @@ def test_backplot_reads_back_arc_and_contour(lib):
     assert {"rapid", "feed", "contour", "drill"} <= kinds
     contour = next(p for p in paths if p.kind == "contour")
     assert any(isinstance(s, Arc) and s.direction == "ccw" for s in contour.segments)
+
+
+# --------------------------------------------------------------------- phase 2b: taps, dies, G74, machine
+from omniturn_cam.fields import new_operation  # noqa: E402
+from omniturn_cam.ops import BoxRough, Tap  # noqa: E402
+
+
+def _job_with(lib, *pairs, ops=()):
+    setup = Setup()
+    for t, tool_id in pairs:
+        setup.add(Station(t, lib[tool_id]))
+    return Job("TEST", "inch", Stock(0.75), setup, {}, list(ops))
+
+
+def test_tap_follows_manual_floating_holder_method(lib):
+    """p2.58: feed in at ~95% of pitch, reverse, dwell, feed out, restore direction."""
+    op = new_operation("tap", 4, lib["tap-1-4-20"], rpm=1000, z_start=0.1, z_end=-0.4)
+    code = post(_job_with(lib, (4, "tap-1-4-20"), ops=[op]))
+    seq = code.split("x0z1\n", 1)[1].split("\n")
+    assert seq[:7] == ["m03s1000", "m08", "z.1", "g95f.0475z-.4", "m04", "g04f.5", "g95f.0475z.1"]
+    assert seq[7] == "m03"
+
+
+def test_acorn_die_programmed_like_a_tap(lib):
+    op = new_operation("tap", 6, lib["acorn-die-3-8-24"], rpm=300, x=0, z_start=0.1, z_end=-0.3)
+    assert isinstance(op, Tap) and abs(op.pitch - 1 / 24) < 1e-5
+
+
+def test_releasing_die_head_dwells_retracts_and_stops_for_reset(lib):
+    op = new_operation("axial", 3, lib["die-head-1-2-20"], rpm=300, z_start=0.1, z_end=-0.5)
+    assert op.stop_after == "m01" and op.sync and op.dwell == 0.2
+    code = post(_job_with(lib, (3, "die-head-1-2-20"), ops=[op]))
+    tail = code.split("g95f.05z-.5p\n", 1)[1].split("\n")
+    assert tail[:5] == ["g04f.2", "g00z.1", "z1", "m05", "m01"]
+
+
+def test_g74_box_rough_always_carries_u(lib):
+    op = BoxRough(t=1, rpm=2000, x=0.395, z=-0.74, depth=0.02, start_x=0.6, start_z=-0.497)
+    code = post(_job_with(lib, (1, "lh-turn-35"), ops=[op]))
+    assert "g74x.395z-.74i.02u.01f.003" in code
+
+
+def test_machine_name_in_header_and_rpm_warning(lib, tmp_path):
+    (tmp_path / "m.toml").write_text('name = "Hardinge HLV-H OmniTurn G4"\nmax_rpm = 3000\n[inch]\nmax_bar = 1.0625\n')
+    m = MachineConfig.load(tmp_path / "m.toml", "inch")
+    warns = []
+    code = post(_job_with(lib, (2, "drill-250"), ops=[Drill(t=2, rpm=3500, z=-0.3)]), m, warnings=warns)
+    assert "(HARDINGE HLV H OMNITURN G4)" in code
+    assert any("3500" in w for w in warns)

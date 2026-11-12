@@ -27,6 +27,8 @@ def main(argv=None) -> int:
     p.add_argument("--tools", required=True, help="tool library TOML")
     p.add_argument("-o", "--output", help="program file (default: JOBNAME.cnc next to the job)")
     p.add_argument("--plot", help="also write a backplot PNG")
+    p.add_argument("--machine", help="machine profile TOML (default: ~/.config/omniturn-cam/machine.toml "
+                                     "if present, else Hardinge HLV-H OmniTurn G4)")
     p.add_argument("--stdout", action="store_true", help="print the program instead of writing it")
 
     l = sub.add_parser("lint", help="check a program against the OmniTurn formatting rules")
@@ -48,11 +50,17 @@ def main(argv=None) -> int:
     if a.cmd == "post":
         lib = ToolLibrary.load(a.tools)
         job = load_job(a.job, lib)
+        from .post import MachineConfig
+        mpath = Path(a.machine) if a.machine else Path.home() / ".config" / "omniturn-cam" / "machine.toml"
+        machine = MachineConfig.load(mpath, job.units) if mpath.exists() else None
+        warns: list[str] = []
         try:
-            code = post(job)
+            code = post(job, machine, warnings=warns)
         except PostError as e:
             print(f"error: {e}", file=sys.stderr)
             return 2
+        for w in warns:
+            print(f"warning: {w}", file=sys.stderr)
         if a.stdout:
             sys.stdout.write(code)
         else:

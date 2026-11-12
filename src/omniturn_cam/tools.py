@@ -19,7 +19,8 @@ ToolKind = Literal[
     "box_tool",          # roller-back / balanced turning box tool
     "knurl_straddle",    # straddle (cut) knurl
     "knurl_bump",        # bump / form knurl
-    "die_head",          # geometric / self-opening die head
+    "die_head",          # releasing die head (geometric / self-opening): no reversal
+    "die_solid",         # solid die holder / acorn die: run like a tap
     "form",
     "custom",
 ]
@@ -35,7 +36,7 @@ Orientation = Literal["radial", "axial", "perpendicular"]
 
 KIND_DEFAULT_ORIENTATION: dict[str, Orientation] = {
     "drill": "axial", "center_drill": "axial", "spot_drill": "axial", "reamer": "axial",
-    "tap": "axial", "bore": "axial", "box_tool": "axial", "die_head": "axial",
+    "tap": "axial", "bore": "axial", "box_tool": "axial", "die_head": "axial", "die_solid": "axial",
 }
 
 AXIAL_KINDS = {"drill", "center_drill", "spot_drill", "reamer", "tap"}

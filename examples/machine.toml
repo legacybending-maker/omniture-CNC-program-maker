@@ -1,0 +1,14 @@
+# Machine profile. Copy to ~/.config/omniturn-cam/machine.toml and edit.
+# Top-level keys apply in both unit systems; [inch] / [metric] override one.
+name = "Hardinge HLV-H OmniTurn G4"   # printed as a comment in every program header
+max_rpm = 3000                        # stock HLV-H spindle is 125-3000 rpm; check your retrofit drive
+
+[inch]
+max_bar = 1.0625      # 5C round collet capacity
+tool_call_z = 1.0     # safe Z for tool calls and between tools
+rapid_feed = 300
+
+[metric]
+max_bar = 27.0
+tool_call_z = 25.0
+rapid_feed = 7620

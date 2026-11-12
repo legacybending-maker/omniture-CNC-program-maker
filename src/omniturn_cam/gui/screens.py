@@ -133,7 +133,7 @@ class JobScreen(Screen):
 
     def _preview(self):
         from ..post.omniturn import OmniTurnPost
-        p = OmniTurnPost(self.job)
+        p = OmniTurnPost(self.job, self.win.machine)
         p.header()
         self.header.setPlainText("\n".join(p.lines))
 
@@ -653,6 +653,8 @@ class CheckScreen(Screen):
             self.canvas.message(self.win.last_error)
             return
         probs = lint(code, self.job.name + ".cnc")
+        for w in self.win.warnings:
+            self._msg(f"warning: {w}", "#a66b00")
         for p in probs:
             self._msg(str(p), "#b00020" if p.severity == "error" else "#a66b00")
         if not probs:

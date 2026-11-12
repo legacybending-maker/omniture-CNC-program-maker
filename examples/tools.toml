@@ -1,6 +1,6 @@
 # Example tool library. One [[tool]] per physical tool.
 # kind: turn bore face groove cutoff thread drill center_drill spot_drill reamer tap
-#       box_tool knurl_straddle knurl_bump die_head form custom
+#       box_tool knurl_straddle knurl_bump die_head (releasing) die_solid (solid holder / acorn) form custom
 # orientation: radial (edge points along X at the centreline), axial (parallel to Z),
 #              perpendicular (body perpendicular to the plate). Defaults by kind.
 # model: optional STEP or DXF of the tool, relative to this file.
@@ -63,3 +63,18 @@ name = "Die head 1/2-20"
 kind = "die_head"
 holder = "screw machine 7/8 shank"
 pitch = 0.05
+
+[[tool]]
+id = "tap-1-4-20"
+name = "Tap 1/4-20"
+kind = "tap"
+diameter = 0.25
+holder = "floating tap holder"
+pitch = 0.05
+
+[[tool]]
+id = "acorn-die-3-8-24"
+name = "Acorn die 3/8-24"
+kind = "die_solid"
+holder = "floating die holder"
+pitch = 0.041667

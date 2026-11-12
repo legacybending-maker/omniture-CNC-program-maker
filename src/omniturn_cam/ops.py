@@ -45,7 +45,7 @@ class Rough(Operation):
     profile: str                        # key into Job.profiles
     cycle: Literal["g75", "g78"] = "g75"
     depth: float = 0.02                 # I word: max depth of cut per side (G75 only)
-    u: float = 0.005                    # U word - see docs/omniturn-post-rules.md (VERIFY)
+    u: float = 0.005                    # U: stock left per side (G75) / over the whole contour (G78)
     feed: float = 0.003
     start_x: float | None = None        # cycle start point S (diameter)
     start_z: float | None = None
@@ -89,7 +89,36 @@ class AxialPass(Operation):
     retract: Literal["rapid", "feed"] = "rapid"
     retract_feed: float | None = None
     reverse_spindle_out: bool = False   # e.g. non-opening dies/taps: m04 on the way out
+    stop_after: Literal["none", "m01", "m00"] = "none"   # e.g. operator resets a die head
+    stop_spindle_for_stop: bool = True  # m05 before the stop so hands aren't near a turning spindle
     label = "axial"
+
+
+@dataclass(kw_only=True)
+class Tap(Operation):
+    """Taps, solid die holders and acorn dies in a floating / self-releasing holder.
+    Programmed the way the manual shows (p2.58): feed in a little under pitch,
+    reverse the spindle, dwell while it reverses, feed back out."""
+    x: float = 0.0
+    z_start: float = 0.1
+    z_end: float = -0.4                 # stop short of full depth; the holder floats the rest
+    pitch: float = 0.05                 # lead per rev (1/TPI)
+    feed_ratio: float = 0.95            # program feed = pitch x ratio, holder takes up the rest
+    reverse_dwell: float = 0.5          # seconds for the spindle to reverse
+    label = "tap"
+
+
+@dataclass(kw_only=True)
+class BoxRough(Operation):
+    """G74 box roughing: removes the rectangle between the start point and X/Z."""
+    x: float                            # finished diameter of the box (leave finish stock here)
+    z: float                            # finished Z of the shoulder (leave finish stock here)
+    depth: float = 0.02                 # I: depth per pass, per side
+    u: float = 0.01                     # ignored by the control but must be present
+    feed: float = 0.003
+    start_x: float | None = None
+    start_z: float | None = None
+    label = "box rough"
 
 
 @dataclass(kw_only=True)
@@ -115,6 +144,6 @@ class Cutoff(RadialPass):
 
 
 OPERATION_TYPES = {
-    "face": Face, "rough": Rough, "finish": Finish, "drill": Drill,
-    "axial": AxialPass, "radial": RadialPass, "cutoff": Cutoff,
+    "face": Face, "box_rough": BoxRough, "rough": Rough, "finish": Finish, "drill": Drill,
+    "tap": Tap, "axial": AxialPass, "radial": RadialPass, "cutoff": Cutoff,
 }

@@ -9,7 +9,7 @@ from ..fields import OP_MENU, form_fields, op_kind
 from .widgets import UNIT_SUFFIX, NumberEdit
 
 GROUP_ORDER = ["Tool", "Shape", "Cut", "Speed"]
-NUMERIC = {"dia", "z", "len", "feed", "feed_ipm", "rpm", "sfm", "sec"}
+NUMERIC = {"dia", "z", "len", "feed", "feed_ipm", "rpm", "sfm", "sec", "text_num"}
 
 
 class OperationForm(QWidget):

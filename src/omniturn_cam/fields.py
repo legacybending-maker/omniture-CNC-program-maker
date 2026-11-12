@@ -49,7 +49,8 @@ FIELDS: dict[str, FieldInfo] = {
                        "G75 box contour: passes parallel to Z.  G78: passes follow the contour",
                        ("g75", "g78"), group="Shape"),
     "depth": FieldInfo("Depth of cut (I)", "len", "Max depth per pass, per side (G75)"),
-    "u": FieldInfo("U value", "len", "G75: stock left for finishing. G78: VERIFY in the manual"),
+    "u": FieldInfo("Finish stock (U)", "len",
+                   "G75: stock left per side after roughing. G78: stock left over the whole contour"),
     "start_x": FieldInfo("Cycle start X", "dia", "Blank = automatic from stock / bore", optional=True,
                          group="Shape"),
     "start_z": FieldInfo("Cycle start Z", "z", "Blank = clearance in front of the shape", optional=True,
@@ -73,9 +74,27 @@ FIELDS: dict[str, FieldInfo] = {
     "retract_feed": FieldInfo("Retract feed", "feed", "Blank = same as the cut", optional=True),
     "reverse_spindle_out": FieldInfo("Reverse spindle to back out", "bool", "Non-opening dies and taps"),
     "stop_spindle_after": FieldInfo("Stop spindle after", "bool", "m05 once the part is off"),
+    "stop_after": FieldInfo("Stop after", "choice",
+                            "m01 optional stop (only stops if the operator has optional stop ON) or "
+                            "m00 program stop (always stops), e.g. to reset a die head",
+                            ("none", "m01", "m00")),
+    "stop_spindle_for_stop": FieldInfo("Stop spindle for the stop", "bool",
+                                       "m05 before the stop so the operator isn't reaching past a turning "
+                                       "spindle; the next cut restarts it"),
+    "pitch": FieldInfo("Pitch / lead", "len", "Lead per revolution, 1/TPI (e.g. .05 for 20 TPI)"),
+    "feed_ratio": FieldInfo("Feed ratio", "text_num",
+                            "Programmed feed = pitch x ratio; the floating holder takes up the rest (manual: ~95%)"),
+    "reverse_dwell": FieldInfo("Reverse dwell", "sec", "Time for the spindle to reverse at the bottom"),
 }
 
 OVERRIDES: dict[str, dict[str, FieldInfo]] = {
+    "box_rough": {"x": FieldInfo("Box corner X", "dia", "Diameter to rough down to (leave finish stock here)"),
+                  "z": FieldInfo("Box corner Z", "z", "Shoulder Z to rough to (leave finish stock here)"),
+                  "depth": FieldInfo("Depth of cut (I)", "len", "Per side, per pass"),
+                  "u": FieldInfo("U (ignored)", "len", "G74 ignores U but the control requires the word")},
+    "tap": {"x": FieldInfo("Diameter", "dia", "0 for a tap on centre"),
+            "z_start": FieldInfo("Start Z", "z", "Just in front of the work"),
+            "z_end": FieldInfo("End Z", "z", "Stop a little short of full depth; the holder floats")},
     "drill": {"z": FieldInfo("Drill depth Z", "z", "Absolute Z of the drill point at full depth"),
               "start_z": FieldInfo("Start Z", "z", "Blank = clearance in front of the face", optional=True)},
     "radial": {"z": FieldInfo("Z position", "z", "Z of the tool's reference edge"),
@@ -88,10 +107,12 @@ OVERRIDES: dict[str, dict[str, FieldInfo]] = {
 # Friendly names and one-line descriptions for the "add process" menu.
 OP_MENU = {
     "face": ("Face", "Face the end of the part"),
+    "box_rough": ("Box rough (G74)", "Remove a rectangle of material in passes"),
     "rough": ("Rough contour", "G75/G78 roughing to a shape - the control works out the passes"),
     "finish": ("Finish contour", "One pass along the shape with nose radius comp"),
     "drill": ("Drill / peck drill", "G81 or G83 on centre"),
-    "axial": ("Axial pass", "Box tool, die head, reamer, burnishing - straight feed along Z"),
+    "tap": ("Tap / solid die", "Tap, solid die holder or acorn die in a floating holder"),
+    "axial": ("Axial pass", "Box tool, releasing die head, reamer, burnishing - straight feed along Z"),
     "radial": ("Radial pass", "Groove, form tool, straddle knurl - straight feed along X"),
     "cutoff": ("Cutoff", "Part off"),
 }
@@ -99,10 +120,12 @@ OP_MENU = {
 # Which tool kinds suit each operation (first match is picked by default).
 OP_TOOL_KINDS = {
     "face": ("turn", "face"),
+    "box_rough": ("turn", "bore"),
     "rough": ("turn", "bore"),
     "finish": ("turn", "bore"),
     "drill": ("center_drill", "spot_drill", "drill"),
-    "axial": ("box_tool", "die_head", "reamer", "tap", "drill"),
+    "tap": ("tap", "die_solid"),
+    "axial": ("box_tool", "die_head", "reamer", "drill"),
     "radial": ("knurl_straddle", "knurl_bump", "groove", "form"),
     "cutoff": ("cutoff",),
 }
@@ -140,10 +163,12 @@ def new_operation(kind: str, t: int, tool=None, **overrides) -> Operation:
         for k, v in tool.params.items():
             if k in cls.__dataclass_fields__:
                 vals[k] = v
-        if tool.kind == "die_head":
-            vals.update(sync=True, feed=tool.params.get("pitch", vals.get("feed")), retract="rapid")
-        if tool.kind in ("tap",):
-            vals.update(sync=True, reverse_spindle_out=True, retract="feed")
+        if tool.kind == "die_head" and kind == "axial":
+            # releasing die head: feed to the trip point, dwell, rapid out, stop to reset
+            vals.update(sync=True, feed=tool.params.get("pitch", vals.get("feed")), retract="rapid",
+                        dwell=0.2, stop_after="m01", comment="Reset die head")
+        if tool.kind in ("tap", "die_solid") and kind == "tap" and "pitch" in tool.params:
+            vals["pitch"] = tool.params["pitch"]
         if tool.kind == "box_tool":
             vals.setdefault("retract", "feed")
         if tool.kind == "knurl_straddle" and "tpi" in tool.params:
@@ -163,7 +188,7 @@ def summary(op: Operation, units: str = "inch") -> str:
         bits.append(op.cycle.upper())
     if kind == "drill":
         bits.append(f"Z{op.z:g}" + (" peck" if op.peck else ""))
-    if kind in ("axial",):
+    if kind in ("axial", "tap"):
         bits.append(f"X{op.x:g} Z{op.z_start:g}>{op.z_end:g}")
     if kind in ("radial", "cutoff"):
         bits.append(f"Z{op.z:g}")

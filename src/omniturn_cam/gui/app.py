@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel, Q
 
 from ..geometry import Point, Profile
 from ..job import Job, Stock, load_job, save_job
-from ..post import PostError, post
+from ..post import MachineConfig, PostError, post
 from ..tools import Setup, ToolLibrary
 from .screens import CheckScreen, JobScreen, PlateScreen, ProcessScreen, ProgramScreen, ShapeScreen
 from .toollib import ToolLibraryDialog
@@ -48,6 +48,15 @@ def default_library_path() -> Path:
     return path
 
 
+def default_machine_path() -> Path:
+    path = CONFIG_DIR / "machine.toml"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with resources.as_file(resources.files("omniturn_cam") / "data" / "default_machine.toml") as src:
+            shutil.copy(src, path)
+    return path
+
+
 def new_job() -> Job:
     return Job("PART1", "inch", Stock(1.0), Setup(), {"od": Profile(Point(0, 0), name="od")}, [])
 
@@ -62,6 +71,8 @@ class MainWindow(QMainWindow):
         self.job_path: Path | None = None
         self.dirty = False
         self.last_error = ""
+        self.warnings: list[str] = []
+        self.machine_path = default_machine_path()
 
         central = QWidget()
         outer = QVBoxLayout(central)
@@ -162,9 +173,18 @@ class MainWindow(QMainWindow):
         self.screens[n].refresh()
         self._banner()
 
-    def generate(self) -> str | None:
+    @property
+    def machine(self) -> MachineConfig:
         try:
-            code = post(self.job)
+            return MachineConfig.load(self.machine_path, self.job.units)
+        except (OSError, ValueError) as e:
+            self.warnings = [f"could not read {self.machine_path}: {e}"]
+            return MachineConfig.for_units(self.job.units)
+
+    def generate(self) -> str | None:
+        self.warnings = []
+        try:
+            code = post(self.job, self.machine, warnings=self.warnings)
         except (PostError, KeyError, ValueError) as e:
             self.last_error = str(e).strip('"')
             return None

@@ -12,33 +12,55 @@ from dataclasses import dataclass, field
 
 from ..geometry import Arc, Line, Point, Profile
 from ..job import Job
-from ..ops import AxialPass, Cutoff, Drill, Face, Finish, Operation, RadialPass, Rough
+from ..ops import AxialPass, BoxRough, Cutoff, Drill, Face, Finish, Operation, RadialPass, Rough, Tap
 from ..tools import Station
 
 
 @dataclass
 class MachineConfig:
+    # Default profile: Hardinge HLV-H toolroom lathe retrofitted with the OmniTurn
+    # G4 control and CNC package (not a factory OmniTurn GT-75). Override per
+    # machine with ~/.config/omniturn-cam/machine.toml.
+    name: str = "Hardinge HLV-H OmniTurn G4"
     units: str = "inch"
     rapid_feed: float = 300.0          # G94 F at 'rapid' (300 IPM is the machine max)
     tool_call_z: float = 1.0           # safe Z for tool calls and between tools
     z_clear: float = 0.05              # approach clearance in front of features
     x_clear: float = 0.05              # radial clearance over stock (added on diameter x2)
-    max_rpm: float = 4000.0
+    max_rpm: float = 3000.0            # HLV-H stock spindle: 125-3000 rpm. VERIFY after retrofit
+    max_bar: float | None = 1.0625     # 5C round collet capacity (inch); None = no check
     decimals: int = 4                  # .0001 on diameter in G72 (manual p2.6)
     feed_decimals: int = 5
     arc_format: str = "r"              # "r" or "ik"
     # Arc direction as seen on the print (Z+ right, X+ up) -> OmniTurn code.
     # Derived from the manual's I/K examples on p2.18-2.19, where a convex
     # face-to-OD corner (print-CCW) is G02. The OmniTurn's X+ points down.
+    # Confirmed against the raised bead in the p2.43 drawing.
     arc_codes: dict = field(default_factory=lambda: {"ccw": "g02", "cw": "g03"})
     max_comment: int = 32
 
     @classmethod
-    def for_units(cls, units: str) -> "MachineConfig":
+    def for_units(cls, units: str, overrides: dict | None = None) -> "MachineConfig":
         if units == "metric":
-            return cls(units="metric", rapid_feed=7620.0, tool_call_z=25.0, z_clear=1.0,
-                       x_clear=1.0, decimals=3, feed_decimals=3)
-        return cls()
+            m = cls(units="metric", rapid_feed=7620.0, tool_call_z=25.0, z_clear=1.0,
+                    x_clear=1.0, decimals=3, feed_decimals=3, max_bar=27.0)
+        else:
+            m = cls()
+        for k, v in (overrides or {}).items():
+            if k == "units" or k not in cls.__dataclass_fields__:
+                continue
+            setattr(m, k, v)
+        return m
+
+    @classmethod
+    def load(cls, path, units: str) -> "MachineConfig":
+        """Read a machine.toml: top-level keys apply to both units, [inch]/[metric] tables
+        override for one unit system."""
+        import tomllib
+        from pathlib import Path
+        data = tomllib.loads(Path(path).read_text())
+        common = {k: v for k, v in data.items() if not isinstance(v, dict)}
+        return cls.for_units(units, common | data.get(units, {}))
 
 
 def fmt(v: float, decimals: int) -> str:
@@ -79,6 +101,7 @@ class OmniTurnPost:
         self.spindle: str | None = None
         self.coolant = False
         self.subs: dict[str, int] = {}       # profile name -> subroutine number
+        self.warnings: list[str] = []
 
     # ------------------------------------------------------------------ format
     def n(self, v: float) -> str:
@@ -86,6 +109,10 @@ class OmniTurnPost:
 
     def f(self, v: float) -> str:
         return fmt(v, self.m.feed_decimals)
+
+    def warn(self, text: str) -> None:
+        if text not in self.warnings:
+            self.warnings.append(text)
 
     def emit(self, line: str) -> None:
         self.lines.append(line)
@@ -187,6 +214,9 @@ class OmniTurnPost:
 
     def est_rpm(self, op: Operation, dia: float) -> float:
         if op.rpm:
+            if op.rpm > self.m.max_rpm:
+                self.warn(f"T{op.t} {op.label}: {op.rpm:g} rpm is over the {self.m.max_rpm:g} rpm "
+                          f"limit set for the {self.m.name}")
             return op.rpm
         if op.sfm:
             k = 1000.0 if self.job.units == "metric" else 12.0
@@ -380,6 +410,38 @@ class OmniTurnPost:
             self.rapid(z=op.z_start)
         if op.reverse_spindle_out:
             self.emit(op.spindle)
+        if op.stop_after != "none":
+            self.rapid(z=self.m.tool_call_z)
+            if op.stop_spindle_for_stop:
+                self.emit("m05")
+                self.spindle = None   # next cut restarts it
+            self.emit(op.stop_after)
+
+    def op_tap(self, op: Tap) -> None:
+        """Floating-holder tapping as shown in the manual (p2.58)."""
+        self.call_tool(op, op.x, self.job.stock.diameter)
+        self.rapid(x=op.x)
+        self.rapid(z=op.z_start)
+        feed = op.pitch * op.feed_ratio
+        self.cut(z=op.z_end, feed=feed)
+        self.emit("m04" if op.spindle == "m03" else "m03")
+        self.dwell(op.reverse_dwell)
+        self.cut(z=op.z_start, feed=feed)
+        self.emit(op.spindle)
+
+    def op_box_rough(self, op: BoxRough) -> None:
+        """G74: the control removes the rectangle between the start point and X/Z (p2.39)."""
+        sx = op.start_x if op.start_x is not None else self.stock_x
+        sz = op.start_z if op.start_z is not None else self.m.z_clear
+        self.call_tool(op, sx, self.job.stock.diameter)
+        self.rapid(x=sx)
+        self.rapid(z=sz)
+        self.css_on(op)
+        self.set_feed(op.feed)
+        # U is ignored by G74 but the control still requires the word.
+        self.emit(f"g74x{self.n(op.x)}z{self.n(op.z)}i{self.n(op.depth)}u{self.n(op.u)}f{self.f(op.feed)}")
+        self.x, self.z, self.motion = sx, sz, None
+        self.css_off(op)
 
     def op_radial(self, op: RadialPass) -> None:
         xs = op.x_start if op.x_start is not None else self.stock_x
@@ -398,7 +460,7 @@ class OmniTurnPost:
             self.emit("m05")
             self.spindle = None
 
-    HANDLERS = {Face: "op_face", Rough: "op_rough", Finish: "op_finish", Drill: "op_drill",
+    HANDLERS = {Face: "op_face", BoxRough: "op_box_rough", Tap: "op_tap", Rough: "op_rough", Finish: "op_finish", Drill: "op_drill",
                 AxialPass: "op_axial", Cutoff: "op_radial", RadialPass: "op_radial"}
 
     # ------------------------------------------------------------------ program
@@ -412,6 +474,10 @@ class OmniTurnPost:
         else:
             self.comment("UNITS INCH G70")
         self.comment("DIAMETER MODE G72 ABSOLUTE G90")
+        self.comment(self.m.name)
+        if self.m.max_bar and j.stock.diameter > self.m.max_bar:
+            self.warn(f"bar diameter {j.stock.diameter:g} is over the {self.m.max_bar:g} collet "
+                      f"capacity set for the {self.m.name}")
         # Safe start: cancel TNR comp, set units, absolute, diameter, IPM, RPM mode.
         self.emit("g40")
         self.emit("g71" if j.units == "metric" else "g70")
@@ -442,12 +508,19 @@ class OmniTurnPost:
         return "\n".join(self.lines) + "\n"
 
 
-def post(job: Job, machine: MachineConfig | None = None, check: bool = True) -> str:
+def post(job: Job, machine: MachineConfig | None = None, check: bool = True,
+         warnings: list | None = None) -> str:
+    """Generate the program. Pass a list as `warnings` to collect non-fatal notes."""
     try:
         job.validate()
     except (KeyError, ValueError) as e:
         raise PostError(str(e).strip('"')) from None
-    code = OmniTurnPost(job, machine).run()
+    if machine is not None and machine.units != job.units:
+        machine = MachineConfig.for_units(job.units, {k: getattr(machine, k) for k in ("name", "max_rpm")})
+    p = OmniTurnPost(job, machine)
+    code = p.run()
+    if warnings is not None:
+        warnings.extend(p.warnings)
     if check:
         from ..lint import lint
         problems = [p for p in lint(code) if p.severity == "error"]

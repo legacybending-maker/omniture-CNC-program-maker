@@ -1,6 +1,9 @@
 # omniturn-cam
 
 Conversational 2D lathe CAM for **OmniTurn** gang-tool CNC lathes (G4 control).
+Developed on a Hardinge HLV-H retrofitted with the OmniTurn G4 control and CNC
+package. Machine limits (max rpm, collet capacity, safe Z) are set in a
+`machine.toml` profile, so other OmniTurn machines and retrofits can use it too.
 Describe the part and the operations, fill-in-the-blank style, and get a program
 the OmniTurn will load from a USB stick. The goal is to take a STEP model of a
 turned part, pull its profile out automatically, and generate the program.
@@ -35,7 +38,7 @@ converts them to the OmniTurn's G02/G03, whose X axis points down.
 | 2 | Fill-in-the-blank GUI (Okuma IGF style), tool library editor | **working** |
 | 2b | Drawing STEP/DXF tool models in the backplot | planned |
 | 3 | STEP import: find the turning axis, cut the half-section, build the profile | planned |
-| 4 | Threading (G33), G74 box roughing, collision checks against tool models | planned |
+| 4 | Threading (G33), collision checks against tool models | planned |
 
 ## Install (Linux)
 
@@ -57,7 +60,7 @@ the bottom:
 | F1 | Job & Blank | program name (8 chars max, becomes the file name), units, bar diameter, existing bore |
 | F2 | Part Shape | the contour as a table of lines and arcs, with a live preview |
 | F3 | Tool Plate | which library tool sits at which T number, and its D offset for nose radius comp |
-| F4 | Processes | face, rough (G75/G78), finish, drill/peck, axial pass, radial pass, cutoff |
+| F4 | Processes | face, box rough (G74), rough (G75/G78), finish, drill/peck, tap / solid die, axial pass (box tool, releasing die head), radial pass, cutoff |
 | F5 | Check | backplot of the generated code plus the OmniTurn rules check |
 | F6 | Program | the program text, **Save to USB stick** (writes `NAME.cnc` with DOS line endings) |
 | F7 | Save job | saves the job as a `.toml` file you can reopen and edit |
@@ -96,9 +99,10 @@ pytest
 
 Please open an issue with what your machine does:
 
-- Arc direction (print-CCW → G02) on the F4 Verify screen
-- Meaning of `U` in G78
 - Spindle-sync `P` syntax for die heads
+- G33 threading parameters (not generated yet)
+- Whether your control accepts G84/G86/G89. They aren't in the G4 manual's code list,
+  so taps and dies are programmed with plain moves, as the manual shows
 
 ## License
 
