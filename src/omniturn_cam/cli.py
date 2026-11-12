@@ -3,6 +3,7 @@
   omniturn-cam post JOB.toml --tools TOOLS.toml [-o OUT.cnc] [--plot OUT.png]
   omniturn-cam lint PROGRAM.cnc
   omniturn-cam plot PROGRAM.cnc OUT.png
+  omniturn-cam gui [JOB.toml]
 """
 from __future__ import annotations
 
@@ -35,7 +36,14 @@ def main(argv=None) -> int:
     b.add_argument("program")
     b.add_argument("png")
 
+    g = sub.add_parser("gui", help="open the fill-in-the-blank programming screens")
+    g.add_argument("job", nargs="?")
+
     a = ap.parse_args(argv)
+
+    if a.cmd == "gui":
+        from .gui.app import main as gui_main
+        return gui_main(["omniturn-cam"] + ([a.job] if a.job else []))
 
     if a.cmd == "post":
         lib = ToolLibrary.load(a.tools)
@@ -49,7 +57,7 @@ def main(argv=None) -> int:
             sys.stdout.write(code)
         else:
             out = Path(a.output) if a.output else Path(a.job).with_name(job.name + ".cnc")
-            out.write_text(code)
+            out.write_bytes(code.replace("\n", "\r\n").encode("ascii"))  # DOS line endings
             print(f"wrote {out}")
         if a.plot:
             from .backplot import plot

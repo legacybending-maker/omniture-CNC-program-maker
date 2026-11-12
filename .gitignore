@@ -5,4 +5,4 @@ build/
 dist/
 out/
 *.png
-!docs/*.png
+!docs/**/*.png

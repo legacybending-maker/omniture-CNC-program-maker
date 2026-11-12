@@ -443,6 +443,10 @@ class OmniTurnPost:
 
 
 def post(job: Job, machine: MachineConfig | None = None, check: bool = True) -> str:
+    try:
+        job.validate()
+    except (KeyError, ValueError) as e:
+        raise PostError(str(e).strip('"')) from None
     code = OmniTurnPost(job, machine).run()
     if check:
         from ..lint import lint

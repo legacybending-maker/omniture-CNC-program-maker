@@ -5,15 +5,20 @@ by the fill-in-the-blank front end. See examples/ for the format.
 """
 from __future__ import annotations
 
+import dataclasses
 import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+import tomli_w
+
 from .geometry import Arc, Line, Point, Profile
 from .ops import OPERATION_TYPES, Operation
 from .tools import Setup, Station, ToolLibrary
+
+NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,8}")
 
 
 @dataclass
@@ -34,21 +39,26 @@ class Job:
     operations: list[Operation] = field(default_factory=list)
     description: str = ""
 
-    def __post_init__(self):
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,8}", self.name):
+    def validate(self) -> None:
+        """Raise ValueError/KeyError describing the first problem found."""
+        if not NAME_RE.fullmatch(self.name):
             raise ValueError(
                 f"job name {self.name!r} must be 1-8 letters/digits: it becomes the "
                 "OmniTurn program file name (manual p2.8)"
             )
+        if self.stock.diameter <= 0:
+            raise ValueError("stock diameter must be greater than zero")
         for prof in self.profiles.values():
             prof.validate()
-        for op in self.operations:
-            self.setup[op.t]  # raises if the station isn't loaded
+        for i, op in enumerate(self.operations, 1):
+            if op.t not in self.setup.stations:
+                raise KeyError(f"operation {i} ({op.label}) uses t{op.t}, which has no tool loaded")
             prof = getattr(op, "profile", None)
             if prof is not None and prof not in self.profiles:
-                raise KeyError(f"operation uses unknown profile {prof!r}")
+                raise KeyError(f"operation {i} ({op.label}) uses unknown profile {prof!r}")
 
 
+# --------------------------------------------------------------------- reading
 def _point(v) -> Point:
     if isinstance(v, dict):
         return Point(float(v["x"]), float(v["z"]))
@@ -69,11 +79,8 @@ def profile_from_dict(name: str, d: dict) -> Profile:
     return prof
 
 
-def load_job(path: str | Path, library: ToolLibrary) -> Job:
-    path = Path(path)
-    data = tomllib.loads(path.read_text())
+def job_from_dict(data: dict, library: ToolLibrary) -> Job:
     j = data["job"]
-
     setup = Setup()
     for st in data.get("station", []):
         setup.add(Station(int(st["t"]), library[st["tool"]], st.get("d")))
@@ -99,4 +106,61 @@ def load_job(path: str | Path, library: ToolLibrary) -> Job:
         setup=setup,
         profiles=profiles,
         operations=ops,
+    )
+
+
+def load_job(path: str | Path, library: ToolLibrary, validate: bool = True) -> Job:
+    job = job_from_dict(tomllib.loads(Path(path).read_text()), library)
+    if validate:
+        job.validate()
+    return job
+
+
+# --------------------------------------------------------------------- writing
+def _clean(d: dict) -> dict:
+    """TOML has no null: drop None values."""
+    return {k: v for k, v in d.items() if v is not None}
+
+
+def profile_to_dict(prof: Profile) -> dict:
+    segs = []
+    for seg in prof.segments:
+        s = {"x": seg.end.x, "z": seg.end.z}
+        if isinstance(seg, Arc):
+            s.update(arc=seg.direction, r=seg.radius)
+        else:
+            if seg.chamfer:
+                s["c"] = seg.chamfer
+            if seg.radius:
+                s["r"] = seg.radius
+        segs.append(s)
+    return {"side": prof.side, "start": {"x": prof.start.x, "z": prof.start.z}, "seg": segs}
+
+
+def op_to_dict(op: Operation) -> dict:
+    kind = next(k for k, cls in OPERATION_TYPES.items() if type(op) is cls)
+    out = {"type": kind}
+    # Write every value explicitly so a saved job never changes if defaults do.
+    for f in dataclasses.fields(op):
+        v = getattr(op, f.name)
+        if v is None or (f.name == "comment" and not v):
+            continue
+        out[f.name] = v
+    return out
+
+
+def job_to_dict(job: Job) -> dict:
+    return {
+        "job": _clean({"name": job.name, "units": job.units, "description": job.description or None}),
+        "stock": _clean(dataclasses.asdict(job.stock) | {"material": job.stock.material or None}),
+        "station": [_clean({"t": st.t, "tool": st.tool.id, "d": st.d})
+                    for st in sorted(job.setup.stations.values(), key=lambda s: s.t)],
+        "profile": {name: profile_to_dict(p) for name, p in job.profiles.items()},
+        "op": [op_to_dict(op) for op in job.operations],
+    }
+
+
+def save_job(job: Job, path: str | Path) -> None:
+    Path(path).write_text(
+        "# omniturn-cam job file\n" + tomli_w.dumps(job_to_dict(job), multiline_strings=False)
     )

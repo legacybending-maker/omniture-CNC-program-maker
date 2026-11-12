@@ -115,17 +115,17 @@ def interpret(program: str, arc_codes=None) -> list[Path]:
     return paths
 
 
-def plot(program: str, out_file: str, stock_dia: float | None = None, title: str = "") -> None:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+PALETTE = ["#2a6fdb", "#e0782c", "#2e9e5b", "#b03a9a", "#c9a227", "#5b5b5b"]
 
+
+def draw(ax, program: str, stock_dia: float | None = None, profile=None) -> None:
+    """Draw a backplot onto a matplotlib Axes (radius scale, print view)."""
     paths = interpret(program)
-    fig, ax = plt.subplots(figsize=(10, 5))
     tools = sorted({p.tool for p in paths if p.tool is not None})
-    palette = ["#2a6fdb", "#e0782c", "#2e9e5b", "#b03a9a", "#c9a227", "#5b5b5b"]
-    color = {t: palette[i % len(palette)] for i, t in enumerate(tools)}
+    color = {t: PALETTE[i % len(PALETTE)] for i, t in enumerate(tools)}
     labelled = set()
+    if stock_dia:
+        _stock(ax, stock_dia, paths)
     for p in paths:
         pts = p.points()
         zs = [q[0] for q in pts]
@@ -134,20 +134,60 @@ def plot(program: str, out_file: str, stock_dia: float | None = None, title: str
         if p.kind == "rapid":
             ax.plot(zs, rs, ls=":", lw=0.8, color="#999999")
         elif p.kind == "contour":
-            ax.plot(zs, rs, lw=2.5, color="black", alpha=0.25)
+            ax.plot(zs, rs, lw=3, color="black", alpha=0.18)
         else:
-            lab = f"t{p.tool}" if p.tool not in labelled else None
+            lab = f"T{p.tool}" if p.tool not in labelled else None
             labelled.add(p.tool)
             ax.plot(zs, rs, lw=1.6, color=c, label=lab)
+    _finish_axes(ax)
+    if labelled:
+        ax.legend(loc="best", fontsize=8)
+
+
+def draw_profile(ax, profile, stock_dia: float | None = None, highlight: int | None = None) -> None:
+    """Draw a part shape for the shape-entry screen. highlight = segment index."""
     if stock_dia:
-        ax.axhline(stock_dia / 2, color="#bbbbbb", lw=0.8, ls="--")
+        zmin = min(profile.bounds()[2], 0) - 0.1 * stock_dia
+        ax.fill_between([zmin, max(profile.bounds()[3], 0)], 0, stock_dia / 2,
+                        color="#d9dde3", alpha=0.6, lw=0)
+    pts = profile.polyline()
+    ax.plot([p[0] for p in pts], [p[1] / 2 for p in pts], lw=2, color="#2a6fdb")
+    ax.plot([profile.start.z], [profile.start.r], "o", color="#2e9e5b", ms=5)
+    if highlight is not None and 0 <= highlight < len(profile.segments):
+        segs = profile.segments
+        start = profile.start if highlight == 0 else segs[highlight - 1].end
+        seg = segs[highlight]
+        # draw the highlighted segment as a sharp line/arc on its own
+        hp = expand_moves(start, [type(seg)(seg.end, seg.radius, seg.direction)] if isinstance(seg, Arc)
+                          else [Line(seg.end)])
+        ax.plot([p[0] for p in hp], [p[1] / 2 for p in hp], lw=4, color="#e0782c", alpha=0.7)
+    _finish_axes(ax)
+
+
+def _stock(ax, stock_dia, paths):
+    zs = [q[0] for p in paths for q in p.points()]
+    if zs:
+        ax.fill_between([min(zs), 0], 0, stock_dia / 2, color="#d9dde3", alpha=0.5, lw=0)
+
+
+def _finish_axes(ax):
     ax.axhline(0, color="#444444", lw=0.6, ls="-.")
-    ax.set_aspect("equal")
+    ax.set_aspect("equal", adjustable="box")
+    lo, hi = ax.get_ylim()
+    ax.set_ylim(min(lo, -0.05 * hi), hi * 1.08)
     ax.set_xlabel("Z")
-    ax.set_ylabel("X (radius, print view: X+ up)")
-    ax.set_title(title or "OmniTurn backplot - feeds solid, rapids dotted, G75/G78 contour grey")
-    ax.legend(loc="best", fontsize=8)
+    ax.set_ylabel("X radius (print view, X+ up)")
     ax.grid(True, lw=0.3)
+
+
+def plot(program: str, out_file: str, stock_dia: float | None = None, title: str = "") -> None:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    draw(ax, program, stock_dia)
+    ax.set_title(title or "OmniTurn backplot - feeds solid, rapids dotted, G75/G78 contour grey")
     fig.tight_layout()
     fig.savefig(out_file, dpi=130)
     plt.close(fig)

@@ -1,0 +1,90 @@
+"""Drive the GUI headless the way an operator would and check the job it builds."""
+import os
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("PySide6")
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from omniturn_cam.gui.app import MainWindow  # noqa: E402
+from omniturn_cam.job import load_job  # noqa: E402
+from omniturn_cam.lint import lint  # noqa: E402
+
+EX = Path(__file__).parent.parent / "examples"
+
+
+@pytest.fixture(scope="module")
+def app():
+    return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture
+def win(app, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    w = MainWindow(library_path=EX / "tools.toml")
+    w.dirty = False
+    yield w
+    w.dirty = False
+    w.close()
+
+
+def test_loads_example_and_generates(win):
+    win.open_job(EX / "manual_g75.toml")
+    for i in range(6):
+        win.show_screen(i)
+    assert win.last_error == ""
+    code = win.screens[5].text.toPlainText()
+    assert "g75i.02u.005f.003p1" in code and not [p for p in lint(code) if p.severity == "error"]
+
+
+def test_build_job_from_scratch_and_save(win, tmp_path):
+    win.show_screen(2)                      # tool plate
+    plate = win.screens[2]
+    plate._add()                            # T1 = first library tool (LH turn)
+    st = win.job.setup.stations[1]
+    st.d = 1
+    win.show_screen(1)                      # part shape
+    shape = win.screens[1]
+    shape._add("line")
+    shape.table.item(0, 1).setText("0.5")   # X.5 at Z0
+    shape._add("line")
+    shape.table.item(1, 2).setText("-0.5")  # Z-.5 (X blank = keep .5)
+    shape._add("line")
+    shape.table.item(2, 1).setText("1.0")   # up to the bar
+    prof = win.job.profiles["od"]
+    assert [(s.end.x, s.end.z) for s in prof.segments] == [(0.5, 0), (0.5, -0.5), (1.0, -0.5)]
+
+    win.show_screen(3)                      # processes
+    proc = win.screens[3]
+    proc._add("rough")
+    proc._add("finish")
+    assert [op.label for op in win.job.operations] == ["rough", "finish"]
+    assert win.job.operations[0].t == 1 and win.job.operations[0].profile == "od"
+
+    win.show_screen(4)
+    assert win.last_error == "", win.last_error
+    code = win.generate()
+    assert "g75" in code and "g41" in code and "d1" in code
+
+    win.job_path = tmp_path / "part1.toml"
+    assert win.save()
+    again = load_job(win.job_path, win.library)
+    assert len(again.operations) == 2 and again.setup.stations[1].d == 1
+
+
+def test_errors_are_reported_not_raised(win):
+    win.show_screen(3)
+    win.job.operations.clear()
+    from omniturn_cam.fields import new_operation
+    win.job.operations.append(new_operation("drill", 7))   # no tool at T7
+    win.show_screen(4)
+    assert "t7" in win.last_error
+
+
+def test_die_head_process_prefills_from_tool(win):
+    from omniturn_cam.fields import new_operation
+    op = new_operation("axial", 3, win.library["die-head-1-2-20"])
+    assert op.sync is True and op.feed == 0.05

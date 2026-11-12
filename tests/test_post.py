@@ -98,7 +98,7 @@ def test_die_head_synced_axial_pass(lib):
 
 def test_job_name_limited_to_8_chars(lib):
     with pytest.raises(ValueError, match="8"):
-        Job("TOOLONGNAME", "inch", Stock(1), Setup())
+        Job("TOOLONGNAME", "inch", Stock(1), Setup()).validate()
 
 
 # --------------------------------------------------------------------- lint

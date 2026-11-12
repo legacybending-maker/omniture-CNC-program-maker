@@ -32,14 +32,51 @@ converts them to the OmniTurn's G02/G03, whose X axis points down.
 | Phase | What | State |
 |---|---|---|
 | 1 | Profile model, OmniTurn post, rules linter, backplot, tool library, TOML jobs | **working** |
-| 2 | Fill-in-the-blank GUI (Okuma IGF style), tool library editor, STEP/DXF tool models | planned |
+| 2 | Fill-in-the-blank GUI (Okuma IGF style), tool library editor | **working** |
+| 2b | Drawing STEP/DXF tool models in the backplot | planned |
 | 3 | STEP import: find the turning axis, cut the half-section, build the profile | planned |
 | 4 | Threading (G33), G74 box roughing, collision checks against tool models | planned |
 
-## Quick start (Linux)
+## Install (Linux)
 
 ```bash
-pip install -e ".[dev]"
+git clone https://github.com/legacybending-maker/omniture-CNC-program-maker
+cd omniture-CNC-program-maker
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e ".[gui,dev]"
+omniturn-cam-gui                      # or: omniturn-cam gui examples/manual_g75.toml
+```
+
+## The programming screens
+
+Like Okuma's IGF, you work through numbered steps with function keys along
+the bottom:
+
+| Key | Screen | What you fill in |
+|---|---|---|
+| F1 | Job & Blank | program name (8 chars max, becomes the file name), units, bar diameter, existing bore |
+| F2 | Part Shape | the contour as a table of lines and arcs, with a live preview |
+| F3 | Tool Plate | which library tool sits at which T number, and its D offset for nose radius comp |
+| F4 | Processes | face, rough (G75/G78), finish, drill/peck, axial pass, radial pass, cutoff |
+| F5 | Check | backplot of the generated code plus the OmniTurn rules check |
+| F6 | Program | the program text, **Save to USB stick** (writes `NAME.cnc` with DOS line endings) |
+| F7 | Save job | saves the job as a `.toml` file you can reopen and edit |
+| F8 | Tool library | add or edit tools, including screw-machine tooling |
+
+When you add a process it picks a suitable tool from the plate and fills in
+values from that tool's parameters. A die head with `pitch = 0.05` gives a
+spindle-synced axial pass at .05 IPR.
+
+![Part shape screen](docs/screenshots/2-shape.png)
+![Processes screen](docs/screenshots/4-processes.png)
+![Check screen](docs/screenshots/5-check.png)
+
+Your tool library lives in `~/.config/omniturn-cam/tools.toml`. A starter
+library is copied there the first time the program runs.
+
+## Command line
+
+```bash
 omniturn-cam post examples/manual_g75.toml --tools examples/tools.toml --plot out.png
 omniturn-cam lint MANG75.cnc       # works on hand-written programs too
 pytest

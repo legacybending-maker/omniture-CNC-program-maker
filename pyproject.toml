@@ -9,15 +9,19 @@ description = "Conversational 2D lathe CAM for OmniTurn gang-tool lathes: profil
 readme = "README.md"
 license = "GPL-3.0-or-later"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["tomli-w>=1.0"]
 
 [project.optional-dependencies]
 plot = ["matplotlib>=3.7"]
+gui = ["PySide6-Essentials>=6.5", "matplotlib>=3.7"]
 step = ["cadquery-ocp>=7.7"]
 dev = ["pytest>=7", "matplotlib>=3.7"]
 
 [project.scripts]
 omniturn-cam = "omniturn_cam.cli:main"
+
+[project.gui-scripts]
+omniturn-cam-gui = "omniturn_cam.gui.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -25,3 +29,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.setuptools.package-data]
+omniturn_cam = ["data/*.toml"]

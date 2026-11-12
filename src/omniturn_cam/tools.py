@@ -104,6 +104,37 @@ class ToolLibrary:
             tools.append(Tool(**entry))
         return cls(tools)
 
+    def remove(self, tool_id: str) -> None:
+        del self._tools[tool_id]
+
+    def rekey(self, old_id: str, tool: Tool) -> None:
+        """Replace the entry stored under old_id with tool (whose id may differ)."""
+        if tool.id != old_id and tool.id in self._tools:
+            raise ValueError(f"duplicate tool id {tool.id!r}")
+        items = [(tool.id, tool) if k == old_id else (k, v) for k, v in self._tools.items()]
+        self._tools = dict(items)
+
+    def save(self, path: str | Path) -> None:
+        import tomli_w
+        path = Path(path)
+        out = []
+        for t in self:
+            d = {"id": t.id, "name": t.name, "kind": t.kind, "hand": t.hand,
+                 "orientation": t.orientation, "nose_radius": t.nose_radius,
+                 "diameter": t.diameter, "width": t.width, "holder": t.holder or None,
+                 "model": t.model, "units": t.units, "notes": t.notes or None}
+            if t.model:
+                try:
+                    d["model"] = str(Path(t.model).resolve().relative_to(path.parent.resolve()))
+                except ValueError:
+                    pass
+            d = {k: v for k, v in d.items() if v is not None}
+            for k, v in t.params.items():
+                if k not in d and v is not None:
+                    d[k] = v
+            out.append(d)
+        path.write_text("# omniturn-cam tool library\n" + tomli_w.dumps({"tool": out}))
+
 
 @dataclass
 class Station:
