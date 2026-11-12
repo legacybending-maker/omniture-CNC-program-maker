@@ -227,3 +227,56 @@ def test_g33_internal_thread_starts_inside(lib):
                 first_depth=0.01, infeed_angle=29)
     code = post(_thread_job(lib, op))
     assert "g33x.9375z-.75i.01k.05c" in code and "\nx.8883\n" in code
+
+
+# --------------------------------------------------------------------- external subroutines, M98, raw code
+from omniturn_cam.ops import CallSub, RawCode  # noqa: E402
+
+
+def test_include_file_appended_and_contour_renumbered(lib, tmp_path):
+    ext = tmp_path / "extsub.cnc"
+    ext.write_text("}1\nm10\nm99\n}2\nm11\nm99\n")
+    job = load_job(EX / "manual_g75.toml", lib)
+    job.include_subs = str(ext)
+    job.operations.append(CallSub(sub=1, comment="Load bar"))
+    code = post(job)
+    assert "g75i.02u.005f.003p3" in code and "\n}3\n" in code   # moved past 1 and 2
+    assert code.rstrip().endswith("}2\nm11\nm99")
+    assert "m98p1" in code
+    assert not [p for p in lint(code) if p.severity == "error"]
+
+
+def test_lint_flags_duplicate_subs_and_m95_without_sub1():
+    msgs = " | ".join(p.message for p in lint("m95\nm30\n}2\nm99\n}2\nm99\n"))
+    assert "defined twice" in msgs and "subroutine 1 is called" in msgs
+
+
+def test_raw_code_passes_through_and_parks_tool_first(lib):
+    op = RawCode(code="m91\nm10\n")
+    code = post(_raw_job(lib, op))
+    i = code.index("m91")
+    assert code[:i].rstrip().endswith("z1") and "m10" in code
+    # the drill after the raw code is called again with both X and Z
+    assert code.count("t2(") == 2
+
+
+def _raw_job(lib, op):
+    return _job_with(lib, (2, "drill-250"), ops=[Drill(t=2, rpm=2000, z=-0.1), op, Drill(t=2, rpm=2000, z=-0.2)])
+
+
+def test_thread_locks_overrides(lib):
+    op = Thread(t=4, rpm=500, major=0.495, minor=0.408, z_end=-0.5, lead=0.077, first_depth=0.02)
+    code = post(_thread_job(lib, op))
+    assert code.index("m84") < code.index("g33") < code.index("m85")
+
+
+def test_every_operation_round_trips_through_a_saved_job(lib, tmp_path):
+    from omniturn_cam.fields import OP_MENU
+    from omniturn_cam.job import save_job
+    from omniturn_cam.ops import OPERATION_TYPES
+    assert set(OP_MENU) == set(OPERATION_TYPES)
+    job = load_job(EX / "manual_g75.toml", lib)
+    job.operations = [new_operation(k, 1) for k in OPERATION_TYPES]
+    save_job(job, tmp_path / "all.toml")
+    again = load_job(tmp_path / "all.toml", lib, validate=False)
+    assert [type(o) for o in again.operations] == [type(o) for o in job.operations]

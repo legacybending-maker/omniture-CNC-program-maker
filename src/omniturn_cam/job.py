@@ -38,6 +38,15 @@ class Job:
     profiles: dict[str, Profile] = field(default_factory=dict)
     operations: list[Operation] = field(default_factory=list)
     description: str = ""
+    include_subs: str | None = None     # file of subroutines appended after M30 (e.g. ZipLoader subs)
+
+    def external_subs(self) -> tuple[str, list[int]]:
+        """Text of the include file and the subroutine numbers it defines."""
+        if not self.include_subs:
+            return "", []
+        text = Path(self.include_subs).read_text(errors="replace")
+        nums = [int(n) for n in re.findall(r"^\s*\}(\d+)\s*$", text, re.M)]
+        return text, nums
 
     def validate(self) -> None:
         """Raise ValueError/KeyError describing the first problem found."""
@@ -50,7 +59,11 @@ class Job:
             raise ValueError("stock diameter must be greater than zero")
         for prof in self.profiles.values():
             prof.validate()
+        if self.include_subs and not Path(self.include_subs).is_file():
+            raise ValueError(f"subroutine file {self.include_subs} not found")
         for i, op in enumerate(self.operations, 1):
+            if not op.uses_tool:
+                continue
             if op.t not in self.setup.stations:
                 raise KeyError(f"operation {i} ({op.label}) uses t{op.t}, which has no tool loaded")
             prof = getattr(op, "profile", None)
@@ -79,7 +92,7 @@ def profile_from_dict(name: str, d: dict) -> Profile:
     return prof
 
 
-def job_from_dict(data: dict, library: ToolLibrary) -> Job:
+def job_from_dict(data: dict, library: ToolLibrary, base_dir: Path | None = None) -> Job:
     j = data["job"]
     setup = Setup()
     for st in data.get("station", []):
@@ -98,10 +111,14 @@ def job_from_dict(data: dict, library: ToolLibrary) -> Job:
         ops.append(cls(**o))
 
     s = data["stock"]
+    inc = j.get("include_subs")
+    if inc and base_dir is not None and not Path(inc).is_absolute():
+        inc = str((base_dir / inc).resolve())
     return Job(
         name=j["name"],
         units=j.get("units", "inch"),
         description=j.get("description", ""),
+        include_subs=inc,
         stock=Stock(float(s["diameter"]), s.get("length"), s.get("bore"), s.get("material", "")),
         setup=setup,
         profiles=profiles,
@@ -110,7 +127,7 @@ def job_from_dict(data: dict, library: ToolLibrary) -> Job:
 
 
 def load_job(path: str | Path, library: ToolLibrary, validate: bool = True) -> Job:
-    job = job_from_dict(tomllib.loads(Path(path).read_text()), library)
+    job = job_from_dict(tomllib.loads(Path(path).read_text()), library, Path(path).parent)
     if validate:
         job.validate()
     return job
@@ -151,7 +168,8 @@ def op_to_dict(op: Operation) -> dict:
 
 def job_to_dict(job: Job) -> dict:
     return {
-        "job": _clean({"name": job.name, "units": job.units, "description": job.description or None}),
+        "job": _clean({"name": job.name, "units": job.units, "description": job.description or None,
+                       "include_subs": job.include_subs}),
         "stock": _clean(dataclasses.asdict(job.stock) | {"material": job.stock.material or None}),
         "station": [_clean({"t": st.t, "tool": st.tool.id, "d": st.d})
                     for st in sorted(job.setup.stations.values(), key=lambda s: s.t)],

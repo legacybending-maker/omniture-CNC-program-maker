@@ -77,6 +77,17 @@ class JobScreen(Screen):
         f.addRow("Program name", self.name)
         f.addRow("Description", self.desc)
         f.addRow("Units", self.units)
+        subrow = QHBoxLayout()
+        self.subs = QLineEdit()
+        self.subs.setPlaceholderText("none")
+        self.subs.setToolTip("A file of saved subroutines (e.g. ZipLoader / bar-load subs) copied in below M30. "
+                             "Generated contour subroutines are numbered around it.")
+        self.subs.editingFinished.connect(lambda: self._set("include_subs", self.subs.text().strip() or None))
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._browse_subs)
+        subrow.addWidget(self.subs, 1)
+        subrow.addWidget(browse)
+        f.addRow("Subroutine file", subrow)
         self.units_note = QLabel("")
         self.units_note.setStyleSheet("color:#667")
         self.units_note.setWordWrap(True)
@@ -113,6 +124,13 @@ class JobScreen(Screen):
         self.win.touched()
         self._preview()
 
+    def _browse_subs(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Subroutine file", str(Path.home()),
+                                              "OmniTurn programs (*.cnc *.txt *);;All files (*)")
+        if path:
+            self.subs.setText(path)
+            self._set("include_subs", path)
+
     def _stock(self, attr, v):
         setattr(self.job.stock, attr, v)
         self.win.touched()
@@ -141,6 +159,7 @@ class JobScreen(Screen):
         j = self.job
         self.name.setText(j.name)
         self.desc.setText(j.description)
+        self.subs.setText(j.include_subs or "")
         self.units.blockSignals(True)
         self.units.setCurrentText(j.units)
         self.units.blockSignals(False)
@@ -576,7 +595,15 @@ class ProcessScreen(Screen):
             item.setText(f"{row + 1:>2}.  {summary(self.job.operations[row], self.job.units)}")
 
     def _add(self, kind):
+        from ..ops import OPERATION_TYPES
         stations = sorted(self.job.setup.stations.values(), key=lambda s: s.t)
+        if not OPERATION_TYPES[kind].uses_tool:
+            op = OPERATION_TYPES[kind]()
+            at = self.list.currentRow() + 1 if self.list.currentRow() >= 0 else len(self.job.operations)
+            self.job.operations.insert(at, op)
+            self.win.touched()
+            self.refresh(select=at)
+            return
         if not stations:
             QMessageBox.warning(self, "Add process", "Load some tools on the plate first (F3).")
             return

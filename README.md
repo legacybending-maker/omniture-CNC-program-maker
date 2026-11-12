@@ -58,10 +58,10 @@ the bottom:
 
 | Key | Screen | What you fill in |
 |---|---|---|
-| F1 | Job & Blank | program name (8 chars max, becomes the file name), units, bar diameter, existing bore |
+| F1 | Job & Blank | program name (8 chars max, becomes the file name), units, bar diameter, existing bore, a subroutine file to copy in below M30 (e.g. ZipLoader subs) |
 | F2 | Part Shape | the contour as a table of lines and arcs, with a live preview |
 | F3 | Tool Plate | which library tool sits at which T number, and its D offset for nose radius comp |
-| F4 | Processes | face, box rough (G74), rough (G75/G78), finish, drill/peck, thread (G33), tap / solid die, axial pass (box tool, releasing die head), radial pass, cutoff |
+| F4 | Processes | face, box rough (G74), rough (G75/G78), finish, drill/peck, thread (G33), tap / solid die, axial pass (box tool, releasing die head), radial pass, cutoff, call subroutine (M98), raw program lines |
 | F5 | Check | backplot of the generated code plus the OmniTurn rules check |
 | F6 | Program | the program text, **Save to USB stick** (writes `NAME.cnc` with DOS line endings) |
 | F7 | Save job | saves the job as a `.toml` file you can reopen and edit |

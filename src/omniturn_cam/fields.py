@@ -102,6 +102,11 @@ FIELDS: dict[str, FieldInfo] = {
                          "Tool keeps travelling forward as it pulls out - no undercut needed"),
     "taper_a": FieldInfo("Taper (A)", "len", "X travel over the whole Z travel including run-up. "
                                             "Needs a start X", optional=True, blank="none"),
+    "lock_overrides": FieldInfo("Lock overrides (M84)", "bool",
+                                "Lock feed and spindle overrides at 100% for the thread so rpm can't change "
+                                "between passes; M85 unlocks after"),
+    "sub": FieldInfo("Subroutine number", "int", "M98 P number - must exist below M30 (e.g. in the include file)"),
+    "code": FieldInfo("Program lines", "multiline", "Copied into the program as written, then rules-checked"),
     "spring_passes": FieldInfo("Spring passes (O)", "int", "Extra single passes at finished depth"),
     "pitch": FieldInfo("Pitch / lead", "len", "Lead per revolution, 1/TPI (e.g. .05 for 20 TPI)"),
     "feed_ratio": FieldInfo("Feed ratio", "text_num",
@@ -137,6 +142,8 @@ OP_MENU = {
     "rough": ("Rough contour", "G75/G78 roughing to a shape - the control works out the passes"),
     "finish": ("Finish contour", "One pass along the shape with nose radius comp"),
     "drill": ("Drill / peck drill", "G81 or G83 on centre"),
+    "call_sub": ("Call subroutine (M98)", "Run a loader / bar-feed or other saved subroutine"),
+    "raw": ("Raw program lines", "Loader M-codes, input waits, anything not covered above"),
     "thread": ("Thread (G33)", "Single-point thread - the control works out the passes"),
     "tap": ("Tap / solid die", "Tap, solid die holder or acorn die in a floating holder"),
     "axial": ("Axial pass", "Box tool, releasing die head, reamer, burnishing - straight feed along Z"),
@@ -167,9 +174,13 @@ def op_kind(op: Operation) -> str:
     return next(k for k, cls in OPERATION_TYPES.items() if type(op) is cls)
 
 
+TOOL_ONLY = {"t", "rpm", "sfm", "min_rpm", "max_rpm", "spindle", "coolant"}
+
+
 def form_fields(op: Operation) -> list[tuple[str, FieldInfo]]:
     kind = op_kind(op)
-    return [(f.name, info(kind, f.name)) for f in dataclasses.fields(op)]
+    return [(f.name, info(kind, f.name)) for f in dataclasses.fields(op)
+            if op.uses_tool or f.name not in TOOL_ONLY]
 
 
 def is_required(op_cls, name: str) -> bool:
@@ -209,7 +220,12 @@ def new_operation(kind: str, t: int, tool=None, **overrides) -> Operation:
 def summary(op: Operation, units: str = "inch") -> str:
     kind = op_kind(op)
     name = OP_MENU[kind][0]
-    bits = [f"T{op.t}", name]
+    bits = [f"T{op.t}", name] if op.uses_tool else [name]
+    if kind == "call_sub":
+        bits.append(f"P{op.sub}")
+    if kind == "raw":
+        first = next((l.strip() for l in op.code.splitlines() if l.strip()), "")
+        bits.append(first + (" ..." if op.code.count("\n") else ""))
     if hasattr(op, "profile"):
         bits.append(f"[{op.profile}]")
     if kind == "rough":

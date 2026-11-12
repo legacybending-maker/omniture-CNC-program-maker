@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QLabel, QLineEdit,
-                               QVBoxLayout, QWidget)
+                               QPlainTextEdit, QVBoxLayout, QWidget)
 
 from ..fields import OP_MENU, form_fields, op_kind
 from .widgets import UNIT_SUFFIX, NumberEdit
@@ -85,6 +86,12 @@ class OperationForm(QWidget):
                             suffix=units.get(info.kind, ""), placeholder=info.blank if info.optional else "")
             ne.valueChanged.connect(lambda val: self._set(name, val))
             return ne
+        if info.kind == "multiline":
+            te = QPlainTextEdit(str(v or ""))
+            te.setMinimumHeight(160)
+            te.setFont(QFont("monospace"))
+            te.textChanged.connect(lambda te=te: self._set(name, te.toPlainText()))
+            return te
         le = QLineEdit(str(v or ""))
         le.editingFinished.connect(lambda le=le: self._set(name, le.text()))
         return le

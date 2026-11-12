@@ -24,6 +24,7 @@ class Operation:
     comment: str = ""
 
     label = "operation"
+    uses_tool = True
 
 
 @dataclass(kw_only=True)
@@ -126,6 +127,7 @@ class Thread(Operation):
     taper_a: float | None = None        # A: X travel over the full Z travel incl. run-up
     spring_passes: int = 0              # extra single passes at finished depth (O)
     start_x: float | None = None        # override the computed start diameter
+    lock_overrides: bool = True         # M84 before / M85 after: spindle override can't change rpm mid-thread
     label = "thread"
 
 
@@ -164,7 +166,28 @@ class Cutoff(RadialPass):
     label = "cutoff"
 
 
+@dataclass(kw_only=True)
+class CallSub(Operation):
+    """M98 call to a subroutine - e.g. a ZipLoader / bar-load routine from the
+    job's external subroutine file."""
+    t: int | None = None
+    sub: int = 1
+    label = "call sub"
+    uses_tool = False
+
+
+@dataclass(kw_only=True)
+class RawCode(Operation):
+    """Lines passed straight into the program (loader M-codes, M91-M94 waits,
+    LS/LF loops...). Still checked by the rules linter."""
+    t: int | None = None
+    code: str = ""
+    label = "raw code"
+    uses_tool = False
+
+
 OPERATION_TYPES = {
     "face": Face, "box_rough": BoxRough, "rough": Rough, "finish": Finish, "drill": Drill,
     "thread": Thread, "tap": Tap, "axial": AxialPass, "radial": RadialPass, "cutoff": Cutoff,
+    "call_sub": CallSub, "raw": RawCode,
 }

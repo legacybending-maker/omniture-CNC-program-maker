@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from ..geometry import Arc, Line, Point, Profile
 from ..job import Job
-from ..ops import AxialPass, BoxRough, Cutoff, Drill, Face, Finish, Operation, RadialPass, Rough, Tap, Thread
+from ..ops import AxialPass, BoxRough, Cutoff, Drill, Face, Finish, Operation, RadialPass, Rough, Tap, Thread, CallSub, RawCode
 from ..tools import Station
 
 
@@ -38,6 +38,11 @@ class MachineConfig:
     # Confirmed against the raised bead in the p2.43 drawing.
     arc_codes: dict = field(default_factory=lambda: {"ccw": "g02", "cw": "g03"})
     max_comment: int = 32
+    # First subroutine number for generated contours. Subroutine 1 is special:
+    # M95 jumps to it on the loader input (manual p2.55), and saved loader
+    # subroutine files are usually numbered from 1. Contours are also moved
+    # past any numbers used by the job's include file.
+    first_sub: int = 1
 
     @classmethod
     def for_units(cls, units: str, overrides: dict | None = None) -> "MachineConfig":
@@ -102,6 +107,7 @@ class OmniTurnPost:
         self.coolant = False
         self.subs: dict[str, int] = {}       # profile name -> subroutine number
         self.warnings: list[str] = []
+        self.external_text, self.external_nums = job.external_subs()
 
     # ------------------------------------------------------------------ format
     def n(self, v: float) -> str:
@@ -109,6 +115,13 @@ class OmniTurnPost:
 
     def f(self, v: float) -> str:
         return fmt(v, self.m.feed_decimals)
+
+    def next_sub(self) -> int:
+        taken = set(self.subs.values()) | set(self.external_nums)
+        n = self.m.first_sub
+        while n in taken:
+            n += 1
+        return n
 
     def warn(self, text: str) -> None:
         if text not in self.warnings:
@@ -333,7 +346,7 @@ class OmniTurnPost:
         self.rapid(z=sz)
         self.css_on(op)
         self.set_feed(op.feed)
-        sub = self.subs.setdefault(op.profile, len(self.subs) + 1)
+        sub = self.subs.setdefault(op.profile, self.next_sub())
         if op.cycle == "g75":
             self.emit(f"g75i{self.n(op.depth)}u{self.n(op.u)}f{self.f(op.feed)}p{sub}")
         else:
@@ -474,6 +487,8 @@ class OmniTurnPost:
         z0 = op.z_start + op.runup
         self.call_tool(op, clear_x, self.job.stock.diameter)
         self.comment(f"THREAD ABOUT {max(1, round(plan['passes']))} PASSES")
+        if op.lock_overrides:
+            self.emit("m84")   # overrides locked at 100% so rpm can't drift between passes
         words = f"g33x{self.n(plan['final_x'])}z{self.n(op.z_end)}i{self.n(op.first_depth)}k{self.n(k)}"
         if op.taper_a is not None:
             words += f"a{self.n(op.taper_a)}"
@@ -494,6 +509,34 @@ class OmniTurnPost:
                 self.emit(words + tail + "o")
             self.x, self.z, self.motion = sx, zs, None   # cycle returns to its start point
         self.rapid(x=clear_x)
+        if op.lock_overrides:
+            self.emit("m85")
+
+    def _leave_known_state(self) -> None:
+        """Before handing control to code we didn't write, park the slide at safe Z."""
+        if self.tool is not None:
+            self.rapid(z=self.m.tool_call_z)
+
+    def _forget_state(self) -> None:
+        # the subroutine / raw code may move, change tools or spindle: forget what we know
+        self.x = self.z = self.motion = self.feed = None
+        self.spindle = self.rpm = self.tool = None
+
+    def op_call_sub(self, op: CallSub) -> None:
+        self._leave_known_state()
+        if op.comment:
+            self.comment(op.comment)
+        self.emit(f"m98p{op.sub}")
+        self._forget_state()
+
+    def op_raw(self, op: RawCode) -> None:
+        self._leave_known_state()
+        if op.comment:
+            self.comment(op.comment)
+        for line in op.code.splitlines():
+            if line.strip():
+                self.emit(line.strip())
+        self._forget_state()
 
     def op_box_rough(self, op: BoxRough) -> None:
         """G74: the control removes the rectangle between the start point and X/Z (p2.39)."""
@@ -526,7 +569,7 @@ class OmniTurnPost:
             self.emit("m05")
             self.spindle = None
 
-    HANDLERS = {Thread: "op_thread", Face: "op_face", BoxRough: "op_box_rough", Tap: "op_tap", Rough: "op_rough", Finish: "op_finish", Drill: "op_drill",
+    HANDLERS = {CallSub: "op_call_sub", RawCode: "op_raw", Thread: "op_thread", Face: "op_face", BoxRough: "op_box_rough", Tap: "op_tap", Rough: "op_rough", Finish: "op_finish", Drill: "op_drill",
                 AxialPass: "op_axial", Cutoff: "op_radial", RadialPass: "op_radial"}
 
     # ------------------------------------------------------------------ program
@@ -564,6 +607,10 @@ class OmniTurnPost:
             self.x, self.z = prof.start.x, prof.start.z
             self.contour(prof, feed=None)
             self.emit("m99")
+        if self.external_text.strip():
+            for line in self.external_text.splitlines():
+                if line.strip():
+                    self.emit(line.strip())
 
     def run(self) -> str:
         self.header()

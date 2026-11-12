@@ -68,9 +68,24 @@ The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the 
 - G84, G86 and G89 are **not** in the G4 "Codes Honored" list (p2.1–2.2). The manual's tapping method (p2.58) uses ordinary moves and needs a floating or self-releasing holder: `g95f(pitch × .95)z(depth)` → `m04` → `g04f(dwell)` → feed out → `m03`. omniturn-cam uses this for taps, solid die holders and acorn dies.
 - Releasing die heads (geometric): feed at the pitch, spindle-synced (P), to the trip point → short dwell → rapid out → `m05` → `m01` so the operator can reset the head. M01 only stops if optional stop is switched ON at the control ("O" in Automatic mode, p2.53); use M00 if the stop must always happen.
 
-## Subroutines (2.55)
-- `}n` begins subroutine n, `m99` ends it (nothing else on that line), `m98Pn` calls it. Subroutines go after M30.
-- Pattern used by omniturn-cam: finish contour in `}1`, called from G75/G78.
+## Subroutines (2.55; "Using External Sub-routines", Dec 2024)
+- `}n` begins subroutine n and `m99` ends it, each alone on its line. `m98Pn` calls it. Subroutines go after M30, and each number may be defined only once.
+- **Subroutine 1 is special:** `M95` jumps to subroutine 1 when loader input HDR112 is shorted. M97InCnPn (PLC option) jumps conditionally to any subroutine.
+- Shops keep reusable subroutine files (ZipLoader / bar-load routines), usually numbered from 1, and paste them below M30 with the control's editor (Alt-E, "Paste From"). omniturn-cam can copy such a file in itself (job setting `include_subs`). Its own contour subroutines are numbered past any number the file uses, starting at `first_sub` in machine.toml.
+- If a subroutine file will be pasted on the control instead, set `first_sub` above its numbers so they don't clash. The linter flags duplicate subroutine numbers, and M95 with no subroutine 1.
+- Pattern used by omniturn-cam: each finish contour in its own subroutine, called from G75/G78.
+
+## Loader, input and override codes (2.54–2.56)
+- M91/M92 wait for HDR111 open/shorted, M93/M94 wait for HDR110 open/shorted. M10/M11 and M40–M59 are loader functions. M32/M33/M38, M60–M65 are PLC outputs.
+- M84 locks the feed and spindle overrides at 100%; M85 unlocks them, and so do M30, M02 and any tool call. omniturn-cam brackets G33 with M84/M85 by default, so the spindle override can't change the rpm between passes.
+- LSn / LF loop start/finish (2.20–2.21). No comments inside loops.
+
+## Files on the control (External Sub-routines sheet)
+- The control runs DOS. The USB stick is `D:`, programs live in `C:\PROGRAMS`, and saved subroutine files can go in `C:\RUNFILES`. File names are 8 characters. omniturn-cam writes CRLF line endings.
+
+## Resolution (G4 Diagnostics sheet)
+- Axis encoders: 4000 counts per .2" of travel = .00005" per count, so .0001" on diameter. That matches the 4-place diameter output.
+- Spindle encoder: 4000 counts per rev plus a marker. Everything per-rev (G95, G33, G83) depends on it. Ctrl-S in Jog mode checks it.
 
 ## Program end
 - M30 ends and cancels active M functions; M02 ends without cancelling; M00 program stop
