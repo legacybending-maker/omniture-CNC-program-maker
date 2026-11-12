@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from ..geometry import Arc, Line, Point, Profile
 from ..job import Job
-from ..ops import AxialPass, BoxRough, Cutoff, Drill, Face, Finish, Operation, RadialPass, Rough, Tap
+from ..ops import AxialPass, BoxRough, Cutoff, Drill, Face, Finish, Operation, RadialPass, Rough, Tap, Thread
 from ..tools import Station
 
 
@@ -429,6 +429,72 @@ class OmniTurnPost:
         self.cut(z=op.z_start, feed=feed)
         self.emit(op.spindle)
 
+    def thread_plan(self, op: Thread) -> dict:
+        """Numbers the G33 cycle will use, for the post, the GUI and warnings."""
+        depth = abs(op.major - op.minor)                     # diameter terms
+        if op.side == "od":
+            final_x, start_x = op.minor, op.major - op.first_depth
+        else:
+            final_x, start_x = op.major, op.minor + op.first_depth
+        if op.start_x is not None:
+            start_x = op.start_x
+        passes = (depth / op.first_depth) ** 2 if op.first_depth > 0 else float("inf")
+        return {"depth": depth, "final_x": final_x, "start_x": start_x, "passes": passes,
+                "k": op.lead * op.starts, "pitch": op.lead}
+
+    def op_thread(self, op: Thread) -> None:
+        inch = self.job.units == "inch"
+        if not op.rpm or op.sfm:
+            raise PostError(f"T{op.t} thread: threading needs a fixed RPM (G97), not surface speed")
+        if op.first_depth <= 0 or op.lead <= 0 or op.starts < 1:
+            raise PostError(f"T{op.t} thread: lead, starts and first-pass depth must be positive")
+        if op.infeed_angle is not None and not 0 <= op.infeed_angle <= 30:
+            raise PostError(f"T{op.t} thread: infeed angle must be 0-30 degrees (manual p2.24)")
+        plan = self.thread_plan(op)
+        k = plan["k"]
+        feed_limit = self.m.rapid_feed
+        if op.rpm * k > feed_limit + 1e-9:
+            raise PostError(f"T{op.t} thread: {op.rpm:g} rpm x {k:g} lead = {op.rpm * k:g} "
+                            f"{'ipm' if inch else 'mm/min'}, over the {feed_limit:g} limit. "
+                            f"Slow the spindle to {int(feed_limit / k)} rpm or less (p2.23)")
+        min_runup = 0.1 if inch else 2.5
+        if op.runup < min_runup:
+            self.warn(f"T{op.t} thread: run-up {op.runup:g} is short; the manual says start at least "
+                      f"{min_runup:g} away so the slide reaches speed, more for coarse leads or high rpm")
+        if op.taper_a is not None and op.start_x is None:
+            raise PostError(f"T{op.t} thread: give the start X for a tapered thread "
+                            "(the manual corrects the start for the taper over the run-up)")
+        if op.side == "od" and plan["start_x"] <= plan["final_x"] or \
+                op.side == "id" and plan["start_x"] >= plan["final_x"]:
+            raise PostError(f"T{op.t} thread: start X {plan['start_x']:g} is already past the finished "
+                            f"X {plan['final_x']:g}")
+
+        sx = plan["start_x"]
+        clear_x = self.stock_x if op.side == "od" else min(sx, op.minor) - 2 * op.first_depth
+        z0 = op.z_start + op.runup
+        self.call_tool(op, clear_x, self.job.stock.diameter)
+        self.comment(f"THREAD ABOUT {max(1, round(plan['passes']))} PASSES")
+        words = f"g33x{self.n(plan['final_x'])}z{self.n(op.z_end)}i{self.n(op.first_depth)}k{self.n(k)}"
+        if op.taper_a is not None:
+            words += f"a{self.n(op.taper_a)}"
+        tail = ""
+        if op.pullout:
+            tail += "p"
+        if op.infeed_angle is not None:
+            tail += "c" if abs(op.infeed_angle - 29) < 1e-9 else f"c{fmt(op.infeed_angle, 2)}"
+        for s_i in range(op.starts):
+            zs = z0 + s_i * plan["pitch"]
+            self.rapid(x=clear_x)
+            self.rapid(z=zs)
+            self.rapid(x=sx)
+            self.emit(words + tail)
+            # Spring passes repeat the same cycle with O from the same start point,
+            # same rpm, same P/C (p2.26).
+            for _ in range(op.spring_passes):
+                self.emit(words + tail + "o")
+            self.x, self.z, self.motion = sx, zs, None   # cycle returns to its start point
+        self.rapid(x=clear_x)
+
     def op_box_rough(self, op: BoxRough) -> None:
         """G74: the control removes the rectangle between the start point and X/Z (p2.39)."""
         sx = op.start_x if op.start_x is not None else self.stock_x
@@ -460,7 +526,7 @@ class OmniTurnPost:
             self.emit("m05")
             self.spindle = None
 
-    HANDLERS = {Face: "op_face", BoxRough: "op_box_rough", Tap: "op_tap", Rough: "op_rough", Finish: "op_finish", Drill: "op_drill",
+    HANDLERS = {Thread: "op_thread", Face: "op_face", BoxRough: "op_box_rough", Tap: "op_tap", Rough: "op_rough", Finish: "op_finish", Drill: "op_drill",
                 AxialPass: "op_axial", Cutoff: "op_radial", RadialPass: "op_radial"}
 
     # ------------------------------------------------------------------ program

@@ -83,6 +83,13 @@ def interpret(program: str, arc_codes=None) -> list[Path]:
                     paths.append(cp)
             current = None
             continue
+        if "33" in gs:
+            # threading cycle: show the finished-depth pass and the return to start
+            xf, zf = float(d["x"]), float(d["z"])
+            paths.append(Path("feed", tool, Point(x, z), [Line(Point(xf, z)), Line(Point(xf, zf))]))
+            paths.append(Path("rapid", tool, Point(xf, zf), [Line(Point(x, zf)), Line(Point(x, z))]))
+            current = None
+            continue
         if "81" in gs or "83" in gs:
             zd = float(d["z"])
             paths.append(Path("drill", tool, Point(x, z), [Line(Point(x, zd)), Line(Point(x, z))]))

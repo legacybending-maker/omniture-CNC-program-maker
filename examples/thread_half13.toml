@@ -1,0 +1,61 @@
+# The manual's G33 example (p2.25): 1/2-13 OD thread, .5 long, no undercut.
+[job]
+name = "THD1213"
+units = "inch"
+description = "Manual G33 example"
+
+[stock]
+diameter = 0.5
+material = "12L14"
+
+[[station]]
+t = 1
+tool = "lh-turn-35"
+d = 1
+
+[[station]]
+t = 4
+tool = "thread-od-60"
+
+[[station]]
+t = 5
+tool = "cutoff-062"
+
+[profile.od]
+side = "od"
+start = { x = 0, z = 0 }
+seg = [
+  { x = 0.495, c = 0.03 },
+  { z = -0.6 },
+  { x = 0.5 },
+]
+
+[[op]]
+type = "finish"
+t = 1
+rpm = 2500
+profile = "od"
+feed = 0.002
+
+[[op]]
+type = "thread"
+t = 4
+rpm = 500
+side = "od"
+major = 0.495
+minor = 0.408
+z_start = 0.0
+z_end = -0.5
+lead = 0.077
+first_depth = 0.02
+runup = 0.2
+pullout = true
+infeed_angle = 29
+spring_passes = 1
+
+[[op]]
+type = "cutoff"
+t = 5
+rpm = 1500
+z = -0.662
+feed = 0.0015

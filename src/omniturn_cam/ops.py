@@ -109,6 +109,27 @@ class Tap(Operation):
 
 
 @dataclass(kw_only=True)
+class Thread(Operation):
+    """G33 single-point threading cycle (manual p2.23-2.29). The control works out
+    the passes, keeping the material removed per pass constant."""
+    side: Literal["od", "id"] = "od"
+    major: float = 0.5                  # major diameter (OD: what you start from)
+    minor: float = 0.4084               # minor diameter (OD: the X word, the finished depth)
+    z_start: float = 0.0                # where the thread starts on the part
+    z_end: float = -0.5                 # Z word: end of the thread
+    lead: float = 0.05                  # K for a single start = pitch
+    starts: int = 1                     # multi-start: K = lead x starts, Z offset pitch per start
+    first_depth: float = 0.02           # I word: first pass, 2x depth of cut in diameter mode
+    runup: float = 0.2                  # start this far in front of the thread to reach speed
+    infeed_angle: float | None = None   # C: None = straight in, 29 = default angle infeed
+    pullout: bool = False               # P: keep moving forward while pulling out (no undercut)
+    taper_a: float | None = None        # A: X travel over the full Z travel incl. run-up
+    spring_passes: int = 0              # extra single passes at finished depth (O)
+    start_x: float | None = None        # override the computed start diameter
+    label = "thread"
+
+
+@dataclass(kw_only=True)
 class BoxRough(Operation):
     """G74 box roughing: removes the rectangle between the start point and X/Z."""
     x: float                            # finished diameter of the box (leave finish stock here)
@@ -145,5 +166,5 @@ class Cutoff(RadialPass):
 
 OPERATION_TYPES = {
     "face": Face, "box_rough": BoxRough, "rough": Rough, "finish": Finish, "drill": Drill,
-    "tap": Tap, "axial": AxialPass, "radial": RadialPass, "cutoff": Cutoff,
+    "thread": Thread, "tap": Tap, "axial": AxialPass, "radial": RadialPass, "cutoff": Cutoff,
 }

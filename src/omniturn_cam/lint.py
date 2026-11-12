@@ -86,8 +86,8 @@ def lint(program: str, filename: str | None = None) -> list[Problem]:
                                 "must have both X and Z (p2.9)")
             expect_xz_after_tool = None
 
-        if "o" in code_l:
-            add(i, "error", "letter O found in code; use zero (p2.6)")
+        if "o" in (code_l[:-1] if code_l.startswith("g33") and code_l.endswith("o") else code_l):
+            add(i, "error", "letter O found in code; use zero (p2.6). Only a G33 single pass ends in O")
         if re.search(r"(^|[^a-z])n\d", code_l):
             add(i, "error", "N sequence numbers are not allowed (p2.6)")
 

@@ -9,7 +9,7 @@ from ..fields import OP_MENU, form_fields, op_kind
 from .widgets import UNIT_SUFFIX, NumberEdit
 
 GROUP_ORDER = ["Tool", "Shape", "Cut", "Speed"]
-NUMERIC = {"dia", "z", "len", "feed", "feed_ipm", "rpm", "sfm", "sec", "text_num"}
+NUMERIC = {"dia", "z", "len", "feed", "feed_ipm", "rpm", "sfm", "sec", "text_num", "int"}
 
 
 class OperationForm(QWidget):
@@ -81,8 +81,8 @@ class OperationForm(QWidget):
             ch.toggled.connect(lambda on: self._set(name, on))
             return ch
         if info.kind in NUMERIC:
-            ne = NumberEdit(v, optional=info.optional, integer=info.kind == "rpm",
-                            suffix=units.get(info.kind, ""))
+            ne = NumberEdit(v, optional=info.optional, integer=info.kind in ("rpm", "int"),
+                            suffix=units.get(info.kind, ""), placeholder=info.blank if info.optional else "")
             ne.valueChanged.connect(lambda val: self._set(name, val))
             return ne
         le = QLineEdit(str(v or ""))

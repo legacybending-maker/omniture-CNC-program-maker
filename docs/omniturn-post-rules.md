@@ -1,6 +1,6 @@
 # OmniTurn G4 — post-processor rules
 
-Summarised from the OmniTurn Operator and Maintenance Manual (G4 control, 2023–2024 edition, available from omniturn.com). Page refs are manual pages. Items marked **VERIFY** couldn't be read cleanly from the PDF text and need a check against the printed pages or on the machine. Items marked **CONFIRMED** were checked by a machinist against the printed manual.
+Summarised from the OmniTurn Operator and Maintenance Manual (G4 control, 2023 and Sep 2026 editions, available from omniturn.com). Page refs are manual pages. Items marked **VERIFY** couldn't be read cleanly from the PDF text and need a check against the printed pages or on the machine. Items marked **CONFIRMED** were checked by a machinist against the printed manual.
 
 ## Target machine
 The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the OmniTurn G4 control and CNC package**, not a factory OmniTurn GT-75. The control and G-code dialect are the same, but the iron is different. The stock HLV-H spindle runs 125–3000 rpm and takes 5C collets up to 1-1/16" round, and its travels and tool plate layout are its own. Machine-specific limits live in `machine.toml` (see `examples/machine.toml`). Every program header names the machine it was posted for.
@@ -35,8 +35,8 @@ The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the 
 - G94 = IPM (F300 = rapid, also max feed). G95 = IPR (max feed limited to 300 IPM equivalent)
 - G00 switches to rapid; G01 returns to the last-programmed feed; `G95Fn` on a move also switches from rapid to feed
 - M03Sn / M04Sn spindle, M05 stop. G97 RPM (default), G96Sn CSS with G76Sn min / G77Sn max. Turn CSS on after positioning for the cut and back to G97 after (2.52)
-- Adding P to a move starts it in sync with the spindle (2.11) — used for die heads. VERIFY exact syntax (`...p` vs `...p0`)
-- G04Fn dwell in seconds, minimum .1 (2.20). The dwell uses the F word, so the generator restates the feed on the next cut.
+- Adding P to the end of a move starts it in sync with the spindle (2.11, 2.30), e.g. `g95f.05z-.5p`. Used for die heads
+- G04Fn dwell in seconds, minimum .1 (2.20). The manual's tapping example feeds out after a dwell without restating F; omniturn-cam restates it anyway. Never use a dwell for loading or unloading (manual: unsafe).
 
 ## Geometry helpers
 - Auto chamfer/radius on line-to-line corners: `C` or `R` with the absolute size on the move to the theoretical sharp corner. Lines only, not arcs (2.14)
@@ -52,7 +52,17 @@ The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the 
 - G74 `G74XnZnInUnFn` box roughing, rectangular (2.38–2.40). X/Z = corner of the box, I = depth per side. **U is ignored but must be present** (CONFIRMED). Leave finish stock by adjusting X and Z themselves.
 - G81 `G81ZnFn` drill: feed to Z, rapid back to start (2.48)
 - G83 `G83ZnKnFnRnCnLn` peck: K peck depth, R rapid-out plane, C clearance on return, L retract feed (2.49–2.50). Example `G83Z-.5K.1F.003R.5C.05L300`
-- G33 threading `G33XnZnInKnAnCnPO` (2.23–2.30). Readable from the examples: X = final thread diameter, Z = end of thread, K = lead (times starts for multi-start), A = taper (X change over the whole Z travel including run-up), C = angle infeed, P = pull-out at the end, O = single pass, tool returns to start. Retracts between passes to start + 2×I. **VERIFY** before generating: exact meaning of I and how passes are calculated, P pull-out distance, C infeed angle, and the conditions for re-picking a thread with O.
+- G33 threading `G33XnZnInKnAnCnPO` (2.23–2.29, CONFIRMED from the printed pages):
+  - X = finished diameter (OD: minor; ID: major), Z = end of thread
+  - I = depth of the FIRST pass, 2× depth of cut in diameter mode. The control keeps the material removed per pass constant, so passes ≈ (total depth / I)². Start X = major − I (OD), so the first pass is a full I
+  - K = lead. Multi-start: K = lead × starts, one G33 per start, each start's Z offset by the pitch (2.28)
+  - A = taper, X travel over the whole Z travel including the run-up; the start X must be corrected for the taper (2.29)
+  - C = angle infeed; `c` alone = 29°, `c27` = 27°, range 0–30°
+  - P = keep moving forward in Z while pulling out (no undercut); overshoots Z by as much as the X retract
+  - O = single pass at finished depth; pulls out to 3×I. To re-pick a thread: part not moved in the collet, same start X and Z, same spindle speed, same P/C
+  - Retracts between passes to start + 2×I; returns to the start point at the end
+  - Start at least .1" in front of the thread so the slide is up to speed (the ball screw needs about ½ rev); rpm × K must stay under 300 ipm
+- "Do-it-yourself" threading / thread milling: `p` alone at the end of any move starts it in sync with the spindle, e.g. `z-.25p` (2.30, CONFIRMED)
 
 ## Taps and dies
 - G84, G86 and G89 are **not** in the G4 "Codes Honored" list (p2.1–2.2). The manual's tapping method (p2.58) uses ordinary moves and needs a floating or self-releasing holder: `g95f(pitch × .95)z(depth)` → `m04` → `g04f(dwell)` → feed out → `m03`. omniturn-cam uses this for taps, solid die holders and acorn dies.

@@ -38,7 +38,8 @@ converts them to the OmniTurn's G02/G03, whose X axis points down.
 | 2 | Fill-in-the-blank GUI (Okuma IGF style), tool library editor | **working** |
 | 2b | Drawing STEP/DXF tool models in the backplot | planned |
 | 3 | STEP import: find the turning axis, cut the half-section, build the profile | planned |
-| 4 | Threading (G33), collision checks against tool models | planned |
+| 4 | G33 threading (single/multi-start, angle infeed, pull-out, spring passes) | **working** |
+| 5 | Collision checks against tool models, travel limits | planned |
 
 ## Install (Linux)
 
@@ -60,7 +61,7 @@ the bottom:
 | F1 | Job & Blank | program name (8 chars max, becomes the file name), units, bar diameter, existing bore |
 | F2 | Part Shape | the contour as a table of lines and arcs, with a live preview |
 | F3 | Tool Plate | which library tool sits at which T number, and its D offset for nose radius comp |
-| F4 | Processes | face, box rough (G74), rough (G75/G78), finish, drill/peck, tap / solid die, axial pass (box tool, releasing die head), radial pass, cutoff |
+| F4 | Processes | face, box rough (G74), rough (G75/G78), finish, drill/peck, thread (G33), tap / solid die, axial pass (box tool, releasing die head), radial pass, cutoff |
 | F5 | Check | backplot of the generated code plus the OmniTurn rules check |
 | F6 | Program | the program text, **Save to USB stick** (writes `NAME.cnc` with DOS line endings) |
 | F7 | Save job | saves the job as a `.toml` file you can reopen and edit |
@@ -99,8 +100,6 @@ pytest
 
 Please open an issue with what your machine does:
 
-- Spindle-sync `P` syntax for die heads
-- G33 threading parameters (not generated yet)
 - Whether your control accepts G84/G86/G89. They aren't in the G4 manual's code list,
   so taps and dies are programmed with plain moves, as the manual shows
 

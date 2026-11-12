@@ -78,3 +78,11 @@ name = "Acorn die 3/8-24"
 kind = "die_solid"
 holder = "floating die holder"
 pitch = 0.041667
+
+[[tool]]
+id = "thread-od-60"
+name = "OD thread 60 deg"
+kind = "thread"
+hand = "left"
+nose_radius = 0.004
+holder = "3/4 gang block"

@@ -172,3 +172,58 @@ def test_machine_name_in_header_and_rpm_warning(lib, tmp_path):
     code = post(_job_with(lib, (2, "drill-250"), ops=[Drill(t=2, rpm=3500, z=-0.3)]), m, warnings=warns)
     assert "(HARDINGE HLV H OMNITURN G4)" in code
     assert any("3500" in w for w in warns)
+
+
+# --------------------------------------------------------------------- G33 threading (manual p2.23-2.29)
+from omniturn_cam.ops import Thread  # noqa: E402
+
+
+def _thread_job(lib, op):
+    lib.add(Tool(id="thd", name="OD thread", kind="thread")) if "thd" not in [t.id for t in lib] else None
+    return _job_with(lib, (4, "thd"), ops=[op])
+
+
+def test_g33_matches_manual_half_13_example(lib):
+    """p2.25: 1/2-13, major .495, minor .408, I.02 -> start X.475 at Z.2, G33X.408Z-.5I.02K.077P."""
+    op = Thread(t=4, rpm=500, major=0.495, minor=0.408, z_end=-0.5, lead=0.077,
+                first_depth=0.02, pullout=True)
+    code = post(_thread_job(lib, op))
+    lines = code.splitlines()
+    i = lines.index("g33x.408z-.5i.02k.077p")
+    assert lines[i - 1] == "x.475" and "z.2" in lines[i - 2]
+    assert "(THREAD ABOUT 19 PASSES)" in code   # (.087/.02)^2 = 18.9
+
+
+def test_g33_multi_start_offsets_z_by_pitch(lib):
+    """p2.28: three-start 20 pitch: K.15, starts at Z.2, .25, .3."""
+    op = Thread(t=4, rpm=500, major=0.495, minor=0.424, z_end=-0.5, lead=0.05, starts=3,
+                first_depth=0.01, pullout=True, start_x=0.494)
+    code = post(_thread_job(lib, op))
+    assert code.count("g33x.424z-.5i.01k.15p") == 3
+    assert "z.25\n" in code and "z.3\n" in code
+
+
+def test_g33_spring_pass_angle_infeed_and_lint(lib):
+    op = Thread(t=4, rpm=500, major=0.5, minor=0.424, z_end=-0.5, lead=0.05, first_depth=0.008,
+                pullout=True, infeed_angle=29, spring_passes=1)
+    code = post(_thread_job(lib, op))
+    assert "g33x.424z-.5i.008k.05pc\ng33x.424z-.5i.008k.05pco" in code
+    assert not [p for p in lint(code) if p.severity == "error"]
+    op.infeed_angle = 27
+    assert "k.05pc27" in post(_thread_job(lib, op))
+
+
+def test_g33_feed_limit_and_fixed_rpm(lib):
+    op = Thread(t=4, rpm=3000, major=1.0, minor=0.8, z_end=-0.5, lead=0.125, first_depth=0.02)
+    with pytest.raises(PostError, match="300"):
+        post(_thread_job(lib, op))      # 3000 x .125 = 375 ipm
+    op.rpm, op.sfm = None, 300
+    with pytest.raises(PostError, match="fixed RPM"):
+        post(_thread_job(lib, op))
+
+
+def test_g33_internal_thread_starts_inside(lib):
+    op = Thread(t=4, rpm=400, side="id", major=0.9375, minor=0.8783, z_end=-0.75, lead=0.05,
+                first_depth=0.01, infeed_angle=29)
+    code = post(_thread_job(lib, op))
+    assert "g33x.9375z-.75i.01k.05c" in code and "\nx.8883\n" in code
