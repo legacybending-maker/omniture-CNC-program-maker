@@ -1,0 +1,65 @@
+# Example tool library. One [[tool]] per physical tool.
+# kind: turn bore face groove cutoff thread drill center_drill spot_drill reamer tap
+#       box_tool knurl_straddle knurl_bump die_head form custom
+# orientation: radial (edge points along X at the centreline), axial (parallel to Z),
+#              perpendicular (body perpendicular to the plate). Defaults by kind.
+# model: optional STEP or DXF of the tool, relative to this file.
+# Any other keys (pitch, tpi, roller_count...) are kept in the tool's params.
+
+[[tool]]
+id = "lh-turn-35"
+name = "LH turn tool"
+kind = "turn"
+hand = "left"
+nose_radius = 0.0156
+holder = "3/4 gang block"
+
+[[tool]]
+id = "rh-turn-80"
+name = "RH turn tool"
+kind = "turn"
+hand = "right"
+nose_radius = 0.0156
+holder = "3/4 gang block"
+
+[[tool]]
+id = "box-bore"
+name = "Box tool"
+kind = "box_tool"
+nose_radius = 0.0
+holder = "screw machine 7/8 shank"
+
+[[tool]]
+id = "drill-250"
+name = "Drill 1/4"
+kind = "drill"
+diameter = 0.250
+holder = "ER16 collet block"
+
+[[tool]]
+id = "cntr-drill-3"
+name = "Center drill #3"
+kind = "center_drill"
+diameter = 0.125
+holder = "ER16 collet block"
+
+[[tool]]
+id = "cutoff-062"
+name = "Cutoff .062"
+kind = "cutoff"
+width = 0.062
+holder = "blade block"
+
+[[tool]]
+id = "knurl-strd-80"
+name = "Straddle knurl 80 TPI"
+kind = "knurl_straddle"
+holder = "screw machine"
+tpi = 80
+
+[[tool]]
+id = "die-head-1-2-20"
+name = "Die head 1/2-20"
+kind = "die_head"
+holder = "screw machine 7/8 shank"
+pitch = 0.05

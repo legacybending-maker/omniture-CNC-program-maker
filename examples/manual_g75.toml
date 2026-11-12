@@ -1,0 +1,85 @@
+# The OmniTurn manual's worked G75/G78 example (p2.43-2.47), extended into a
+# full job: face, rough with G75, finish with TNR comp, centre drill, cutoff.
+# Run:  omniturn-cam post examples/manual_g75.toml --tools examples/tools.toml
+
+[job]
+name = "MANG75"
+units = "inch"
+description = "Manual G75 example"
+
+[stock]
+diameter = 0.75
+material = "6061"
+
+# Tool plate: which tool is at which T number; d = secondary offset holding nose radius
+[[station]]
+t = 1
+tool = "lh-turn-35"
+d = 1
+
+[[station]]
+t = 2
+tool = "cntr-drill-3"
+
+[[station]]
+t = 5
+tool = "cutoff-062"
+
+# Profiles: x is DIAMETER. Arc direction is as seen on the print
+# (face on the right, chuck on the left, upper half of the part).
+# c / r on a line = OmniTurn auto chamfer / radius into the next line.
+[profile.od]
+side = "od"
+start = { x = 0, z = 0 }
+seg = [
+  { x = 0.343, c = 0.125 },
+  { z = -0.3 },
+  { x = 0.406 },
+  { x = 0.406, z = -0.487, arc = "ccw", r = 0.0935 },
+  { x = 0.375 },
+  { z = -0.75 },
+  { x = 0.75 },
+]
+
+[[op]]
+type = "face"
+t = 1
+rpm = 2500
+stock = 0.01
+feed = 0.003
+comment = "Face"
+
+[[op]]
+type = "rough"
+t = 1
+rpm = 2500
+profile = "od"
+cycle = "g75"
+depth = 0.02
+u = 0.005
+feed = 0.003
+start_x = 0.75
+start_z = 0.05
+comment = "Rough OD"
+
+[[op]]
+type = "finish"
+t = 1
+rpm = 3000
+profile = "od"
+feed = 0.002
+comment = "Finish OD"
+
+[[op]]
+type = "drill"
+t = 2
+rpm = 3000
+z = -0.06
+feed = 0.002
+
+[[op]]
+type = "cutoff"
+t = 5
+rpm = 2000
+z = -0.812
+feed = 0.0015
