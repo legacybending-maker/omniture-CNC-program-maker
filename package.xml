@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+  <name>OmniTurn CAM</name>
+  <description>Conversational 2D lathe CAM for OmniTurn gang-tool lathes (G4 control). Finds the turning axis of a solid, pulls out the OD and ID profiles, and hands them to omniturn-cam, which writes OmniTurn programs.</description>
+  <version>0.2.0</version>
+  <date>2026-11-12</date>
+  <maintainer email="legacybending-maker@users.noreply.github.com">legacybending-maker</maintainer>
+  <license file="LICENSE">GPL-3.0-or-later</license>
+  <url type="repository" branch="main">https://github.com/legacybending-maker/omniture-CNC-program-maker</url>
+  <url type="bugtracker">https://github.com/legacybending-maker/omniture-CNC-program-maker/issues</url>
+  <url type="readme">https://github.com/legacybending-maker/omniture-CNC-program-maker/blob/main/README.md</url>
+  <icon>freecad_workbench/omniturn_freecad/icons/workbench.svg</icon>
+  <freecadmin>1.0.0</freecadmin>
+  <depend type="python">tomli_w</depend>
+  <tag>CAM</tag>
+  <tag>lathe</tag>
+  <tag>turning</tag>
+  <tag>CNC</tag>
+  <tag>OmniTurn</tag>
+  <content>
+    <workbench>
+      <name>OmniTurn CAM</name>
+      <classname>OmniTurnCAMWorkbench</classname>
+      <subdirectory>./freecad_workbench</subdirectory>
+      <icon>omniturn_freecad/icons/workbench.svg</icon>
+    </workbench>
+  </content>
+</package>

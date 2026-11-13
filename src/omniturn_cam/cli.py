@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-import tomllib
 from pathlib import Path
 
 from .job import load_job
@@ -102,9 +101,7 @@ def main(argv=None) -> int:
 
 
 def _step(a) -> int:
-    import tomli_w
-
-    from .job import profile_to_dict
+    from .job import merge_profiles, profiles_toml
     from .stepimport import StepImportError, extend_to_stock, import_step, read_solids
     try:
         if a.solid is None:
@@ -126,12 +123,10 @@ def _step(a) -> int:
     profiles = {"od": r.od} | ({"id": r.id} if r.id else {})
     print(f"# {Path(a.step).name}: {r.max_dia:g} max dia x {r.length:g} long ({a.units})", file=sys.stderr)
     if a.into:
-        data = tomllib.loads(Path(a.into).read_text())
-        data.setdefault("profile", {}).update({k: profile_to_dict(v) for k, v in profiles.items()})
-        Path(a.into).write_text("# omniturn-cam job file\n" + tomli_w.dumps(data))
+        merge_profiles(a.into, profiles)
         print(f"added {', '.join(profiles)} to {a.into}", file=sys.stderr)
     else:
-        sys.stdout.write(tomli_w.dumps({"profile": {k: profile_to_dict(v) for k, v in profiles.items()}}))
+        sys.stdout.write(profiles_toml(profiles))
     return 0
 
 

@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-import tomli_w
-
 from .geometry import Arc, Line, Point, Profile
 from .ops import OPERATION_TYPES, Operation
 from .tools import Setup, Station, ToolLibrary
@@ -178,7 +176,28 @@ def job_to_dict(job: Job) -> dict:
     }
 
 
+def _tomli_w():
+    try:
+        import tomli_w
+    except ImportError as e:   # FreeCAD's bundled Python may not have it
+        raise ImportError("saving job files needs the tomli-w package: pip install tomli-w "
+                          "(in FreeCAD, the Addon Manager installs it with the workbench)") from e
+    return tomli_w
+
+
 def save_job(job: Job, path: str | Path) -> None:
     Path(path).write_text(
-        "# omniturn-cam job file\n" + tomli_w.dumps(job_to_dict(job), multiline_strings=False)
+        "# omniturn-cam job file\n" + _tomli_w().dumps(job_to_dict(job), multiline_strings=False)
     )
+
+
+def profiles_toml(profiles: dict[str, Profile]) -> str:
+    """Just the [profile.*] tables, e.g. to print or paste into a job."""
+    return _tomli_w().dumps({"profile": {k: profile_to_dict(v) for k, v in profiles.items()}})
+
+
+def merge_profiles(path: str | Path, profiles: dict[str, Profile]) -> None:
+    """Add or replace profiles in an existing job file, keeping everything else."""
+    data = tomllib.loads(Path(path).read_text())
+    data.setdefault("profile", {}).update({k: profile_to_dict(v) for k, v in profiles.items()})
+    Path(path).write_text("# omniturn-cam job file\n" + _tomli_w().dumps(data))

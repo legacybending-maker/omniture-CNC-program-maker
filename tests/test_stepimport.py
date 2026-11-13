@@ -1,42 +1,61 @@
-"""STEP import against parts generated with OpenCascade (see stepparts.py)."""
+"""STEP import against the parts in tests/data (made by stepparts.py).
+
+Every test runs once per geometry kernel that imports: OCP in the normal dev
+environment, FreeCAD when pytest runs under FreeCAD's Python. Both must give
+the same profiles.
+"""
+from functools import partial
 from pathlib import Path
 
 import pytest
 
-pytest.importorskip("OCP")
+from omniturn_cam.geometry import Arc, Line  # noqa: F401
+from omniturn_cam import stepimport
+from omniturn_cam.stepimport import StepImportError
 
-import stepparts as sp  # noqa: E402
-
-from omniturn_cam.geometry import Arc, Line  # noqa: E402
-from omniturn_cam.stepimport import StepImportError, import_step, read_solids  # noqa: E402
+DATA = Path(__file__).parent / "data"
 
 MANUAL_OD = [("L", .093, 0), ("L", .343, -.125), ("L", .343, -.3), ("L", .406, -.3),
              ("A", .593, -.3935, "ccw"), ("A", .406, -.487, "ccw"), ("L", .375, -.487),
              ("L", .375, -.75), ("L", .75, -.75), ("L", .75, -1.0)]
 
 
+class _Num(float):
+    """Compares equal within .0001", so a value that sits exactly on a rounding
+    boundary (e.g. -.3935 coming out as -.39349999) can't flip the test."""
+    def __eq__(self, other):
+        if not isinstance(other, (int, float)):
+            return NotImplemented
+        return abs(self - other) < 1e-4
+
+    __hash__ = float.__hash__
+
+
 def flat(profile):
     out = []
     for s in profile.segments:
         k = "A" if isinstance(s, Arc) else "L"
-        t = (k, round(s.end.x, 4), round(s.end.z, 4))
+        t = (k, _Num(s.end.x), _Num(s.end.z))
         out.append(t + ((s.direction,) if k == "A" else ()))
     return out
 
 
 @pytest.fixture(scope="module")
-def parts(tmp_path_factory):
-    d = tmp_path_factory.mktemp("step")
-    feat = sp.cut(sp.cut(sp.manual_part(), sp.cross_hole(-0.6 * sp.IN, 0.125 * sp.IN)),
-                  sp.flat(0.15 * sp.IN, -0.74 * sp.IN, -0.5 * sp.IN))
-    return {
-        "manual": sp.write(d / "manual.step", sp.manual_part()),
-        "moved": sp.write(d / "moved.step", sp.move(sp.manual_part(), 10, -5, 30, (1, 1, 0), 63)),
-        "bush": sp.write(d / "bush.step", sp.bushing()),
-        "features": sp.write(d / "features.step", feat),
-        "blind": sp.write(d / "blind.step", sp.blind_hole_dome()),
-        "two": sp.write(d / "two.step", sp.manual_part(), sp.move(sp.bushing(), 80, 0, 0)),
-    }
+def parts():
+    return {name: DATA / f"{name}.step" for name in ("manual", "moved", "bush", "features", "blind", "two")}
+
+
+@pytest.fixture(params=["ocp", "freecad"], autouse=True)
+def kernel(request, monkeypatch):
+    """Run each test with one kernel; import_step / read_solids below use it."""
+    pytest.importorskip({"ocp": "OCP", "freecad": "FreeCAD"}[request.param])
+    monkeypatch.setitem(globals(), "import_step", partial(stepimport.import_step, kernel=request.param))
+    monkeypatch.setitem(globals(), "read_solids", partial(stepimport.read_solids, kernel=request.param))
+    return request.param
+
+
+import_step = stepimport.import_step
+read_solids = stepimport.read_solids
 
 
 def test_manual_part_matches_drawing(parts):

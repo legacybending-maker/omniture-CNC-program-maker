@@ -1,0 +1,67 @@
+# Runs the whole test suite on every pull request and on every push to main.
+#
+#   standard - the standalone app: OCP (cadquery-ocp) for STEP import, PySide6 GUI
+#   freecad  - the same tests inside FreeCAD's Python (conda-forge FreeCAD), which
+#              also runs the FreeCAD workbench tests and the STEP import tests
+#              with FreeCAD's own geometry kernel
+#
+# Both must pass. Each kernel's STEP tests skip in the other job, so between
+# them every test runs at least once.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  standard:
+    name: standard (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Libraries Qt needs for the headless GUI tests
+        run: sudo apt-get update -q && sudo apt-get install -y -q libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+      - name: Install
+        run: pip install -e ".[all,dev]"
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -rs
+
+  freecad:
+    name: FreeCAD workbench
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: freecad
+          create-args: >-
+            freecad
+            python=3.11
+            pytest
+            tomli-w
+          cache-environment: true
+      - name: FreeCAD version
+        run: python -c "import sys; sys.path.append(sys.prefix + '/lib'); import FreeCAD; print('FreeCAD', '.'.join(FreeCAD.Version()[:3]))"
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: PYTHONPATH="$CONDA_PREFIX/lib" python -m pytest -rs

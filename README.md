@@ -40,6 +40,7 @@ converts them to the OmniTurn's G02/G03, whose X axis points down.
 | 3 | STEP import: find the turning axis, cut the half-section, build OD and ID shapes | **working** |
 | 4 | G33 threading (single/multi-start, angle infeed, pull-out, spring passes) | **working** |
 | 5 | Collision checks against tool models, travel limits | planned |
+| 6 | FreeCAD workbench: profile extraction + save to job **working**; programming screens inside FreeCAD | started |
 
 ## Install (Linux)
 
@@ -110,6 +111,48 @@ omniturn-cam step part.step --flip --stock 0.75              # prints the shapes
 omniturn-cam step part.step --flip --into myjob.toml         # adds them to a job file
 ```
 
+## FreeCAD workbench
+
+The same repository is a FreeCAD add-on (FreeCAD 1.0 or newer). It uses the
+same code as the standalone app, through FreeCAD's own OpenCascade, so nothing
+extra needs installing apart from `tomli-w`.
+
+Install: clone the repo into FreeCAD's `Mod` folder (or, once it's listed, use
+the Addon Manager, which also installs `tomli-w`):
+
+```bash
+cd ~/.local/share/FreeCAD/Mod          # FreeCAD 1.0/1.1; newer versions: ~/.local/share/FreeCAD/v<version>/Mod
+git clone https://github.com/legacybending-maker/omniture-CNC-program-maker OmniTurnCAM
+# then in FreeCAD's Python console, if it says tomli_w is missing:
+#   import subprocess, sys; subprocess.run([sys.executable, "-m", "pip", "install", "--user", "tomli-w"])
+```
+
+Restart FreeCAD and pick **OmniTurn CAM** from the workbench list.
+
+1. Select the turned part in the tree or click one of its faces (in an assembly,
+   clicking a face picks that part).
+2. **Extract turned profile.** The OD (orange) and ID (blue) are drawn on the
+   part where it was cut. The task panel sets the units, which end is Z0, the
+   bar diameter and the run-out, and lists the segments and anything that
+   isn't turned. The profile is a normal parametric object: change the model
+   and it follows; double-click it to change the settings.
+3. **Save profile to job file.** A new file starts a job (8-character name, bar
+   size, profiles); an existing job keeps its tools and operations and only
+   gets new profiles. Open it in `omniturn-cam-gui` to program it.
+
+![FreeCAD workbench](docs/screenshots/freecad-workbench.png)
+
+How it fits together: `src/omniturn_cam/stepimport.py` does all the work and
+never imports a CAD kernel; `kernels/ocp.py` (standalone) and
+`kernels/freecad.py` (FreeCAD) each supply three things — list the solids,
+describe each face, cut with a plane. `freecad_workbench/` is only the FreeCAD
+front end. The STEP import tests run under both kernels and must agree:
+
+```bash
+pytest                                                    # OCP
+PYTHONPATH=<freecad>/lib <freecad>/bin/python -m pytest   # FreeCAD kernel + workbench
+```
+
 ## Command line
 
 ```bash
@@ -118,6 +161,11 @@ omniturn-cam lint MANG75.cnc       # works on hand-written programs too
 pytest
 ```
 
+Every pull request runs the whole suite on GitHub (`.github/workflows/tests.yml`):
+once as the standalone app (OCP + GUI, Python 3.11 and 3.12) and once inside
+FreeCAD (workbench, and STEP import through FreeCAD's kernel). Changes go to
+`main` through a pull request once both are green.
+
 ## Files
 
 - `examples/tools.toml` – tool library. Screw-machine tooling (box tools,
@@ -125,6 +173,9 @@ pytest
   orientation: radial, axial, or perpendicular to the plate. A tool can point
   at a STEP/DXF model of itself.
 - `examples/manual_g75.toml` – the manual's G75 example as a full job.
+- `package.xml`, `freecad_workbench/` – the FreeCAD add-on (see above).
+- `tests/data/*.step` – STEP parts the import tests use; rebuild them with
+  `python tests/stepparts.py` after changing a part.
 - `docs/omniturn-post-rules.md` – every formatting rule the post follows, with
   manual page references and the items still to verify on a machine.
 
