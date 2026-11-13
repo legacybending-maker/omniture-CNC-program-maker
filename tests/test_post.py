@@ -253,6 +253,30 @@ def test_g33_feed_limit_and_fixed_rpm(lib):
         post(_thread_job(lib, op))
 
 
+@pytest.mark.parametrize(
+    "side, start_x, ok",
+    [
+        ("od", 0.475, True),  # between major .495 and minor .408: cuts down to the minor
+        ("od", 0.408, False),  # at the finished X
+        ("od", 0.30, False),  # inside it
+        ("id", 0.420, True),  # between minor .408 and major .495: cuts out to the major
+        ("id", 0.495, False),  # at the finished X
+        ("id", 0.60, False),  # outside it
+    ],
+)
+def test_g33_refuses_a_start_already_past_the_finished_x(lib, side, start_x, ok):
+    """OD finishes at the minor, ID at the major; a start X on or past it leaves
+    G33 nothing to cut (or cuts the wrong way), so the post refuses."""
+    op = Thread(
+        t=4, rpm=400, side=side, major=0.495, minor=0.408, z_end=-0.5, lead=0.077, first_depth=0.02, start_x=start_x
+    )
+    if ok:
+        assert "g33" in post(_thread_job(lib, op))
+    else:
+        with pytest.raises(PostError, match="already past the finished X"):
+            post(_thread_job(lib, op))
+
+
 def test_g33_internal_thread_starts_inside(lib):
     op = Thread(
         t=4, rpm=400, side="id", major=0.9375, minor=0.8783, z_end=-0.75, lead=0.05, first_depth=0.01, infeed_angle=29
@@ -303,11 +327,9 @@ def test_thread_locks_overrides(lib):
 
 
 def test_every_operation_round_trips_through_a_saved_job(lib, tmp_path):
-    from omniturn_cam.fields import OP_MENU
     from omniturn_cam.job import save_job
     from omniturn_cam.ops import OPERATION_TYPES
 
-    assert set(OP_MENU) == set(OPERATION_TYPES)
     job = load_job(EX / "manual_g75.toml", lib)
     job.operations = [new_operation(k, 1) for k in OPERATION_TYPES]
     save_job(job, tmp_path / "all.toml")

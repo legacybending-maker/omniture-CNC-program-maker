@@ -133,7 +133,12 @@ def emit(p: OmniTurnPost, op: Thread) -> None:
             f"T{op.t} thread: give the start X for a tapered thread "
             "(the manual corrects the start for the taper over the run-up)"
         )
-    if op.side == "od" and plan["start_x"] <= plan["final_x"] or op.side == "id" and plan["start_x"] >= plan["final_x"]:
+    # OD threads cut down toward the minor, ID threads out toward the major: the
+    # start has to be on the far side of the finished X or G33 has nothing to cut.
+    already_past = (op.side == "od" and plan["start_x"] <= plan["final_x"]) or (
+        op.side == "id" and plan["start_x"] >= plan["final_x"]
+    )
+    if already_past:
         raise PostError(
             f"T{op.t} thread: start X {plan['start_x']:g} is already past the finished X {plan['final_x']:g}"
         )
