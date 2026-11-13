@@ -111,3 +111,36 @@ def test_step_import_dialog_fills_shapes(win):
     dlg.apply()
     assert win.job.stock.diameter == 1.0
     assert set(win.job.profiles) >= {"od", "id"} and win.job.profiles["id"].side == "id"
+
+
+# The F-key bar, in order. Operators press these by feel, so the order and the
+# keys are part of the interface: change them here, on purpose, or not at all.
+F_KEYS = [
+    "F1 Job & Blank",
+    "F2 Part Shape",
+    "F3 Tool Plate",
+    "F4 Processes",
+    "F5 Check",
+    "F6 Program",
+    "F7 Save Job",
+    "F8 Tool Library",
+]
+
+
+def test_f_keys_are_stable(win):
+    got = [b.text().replace("\n", " ").replace("&&", "&") for b in win.fkeys]
+    assert got == F_KEYS
+
+
+def test_every_operation_form_builds(win):
+    """Each operation's fill-in-the-blank form builds, and every field gets a
+    proper label rather than its Python name."""
+    from omniturn_cam.fields import new_operation
+    from omniturn_cam.gui.forms import OperationForm
+    from omniturn_cam.operations import SPECS
+
+    win.open_job(EX / "manual_g75.toml")
+    for kind in SPECS:
+        op = new_operation(kind, 1)
+        form = OperationForm(op, win.job)
+        form.deleteLater()

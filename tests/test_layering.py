@@ -97,3 +97,16 @@ def test_workbench_does_not_use_standalone_gui(path):
     if "omniturn_cam.gui" in src:
         bad.append("imports omniturn_cam.gui (the standalone PySide6 app)")
     assert not bad, f"{path.name}:\n  " + "\n  ".join(bad)
+
+
+@pytest.mark.parametrize("path", sorted(PKG.rglob("*.py")), ids=_rel)
+def test_relative_imports_resolve(path):
+    """Catches a wrong number of dots after moving a module, including imports
+    inside functions that only run when the operator clicks something."""
+    bad = []
+    for _, _, target, line in _imports(path):
+        if target is None:
+            continue
+        if not (target.with_suffix(".py").is_file() or (target / "__init__.py").is_file()):
+            bad.append(f"line {line}: {target.relative_to(PKG.parent)} does not exist")
+    assert not bad, f"{_rel(path)}:\n  " + "\n  ".join(bad)

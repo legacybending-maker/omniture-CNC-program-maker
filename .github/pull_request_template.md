@@ -7,8 +7,8 @@ Closes #
 ## Area
 
 <!-- One area per PR. Tick one. -->
-- [ ] Post / G-code (`post/`, `ops.py`, `lint.py`)
-- [ ] GUI (`gui/`, `fields.py`)
+- [ ] Post / G-code (`post/`, `operations/`, `lint.py`)
+- [ ] GUI (`gui/`, `fields.py`, operation labels in `operations/`)
 - [ ] Model import (`stepimport`, `meshimport`, `kernels/`)
 - [ ] FreeCAD workbench
 - [ ] Job / tool / machine files

@@ -15,7 +15,7 @@ same pull request.
                          (kernels/ for STEP)                         │
  hand-entered shape (GUI F2, job TOML) ──────────────────────────────┤
                                                                      ▼
- tools.toml ──► ToolLibrary ──► Setup (stations) ──►  Job (job.py) ◄── operations (ops.py)
+ tools.toml ──► ToolLibrary ──► Setup (stations) ──►  Job (job.py) ◄── operations/ (one file each)
                                                        │   saved/loaded as job TOML
                                                        ▼
                                    post/omniturn.py  (MachineConfig from machine.toml)
@@ -56,16 +56,18 @@ The only kernel-specific calls are the three in `kernels/`:
 | Module | Job |
 |---|---|
 | `geometry.py` | `Profile`: a start point plus `Line` / `Arc` segments, X as diameter, arcs in print terms. Validation, bounds, undercut check, tessellation |
-| `ops.py` | One dataclass per operation (what the operator fills in). `OPERATION_TYPES` maps the job-file `type` to the class |
-| `fields.py` | Labels, units, help text, menu entries and tool kinds for every operation field. The GUI builds its forms from this |
+| `operations/` | One module per operation type: its dataclass (what the operator fills in), its field labels, menu entry, tool kinds, process-list summary, tool-based defaults and its OmniTurn emitter, registered as one `SPEC = OpSpec(...)`. The package finds the modules itself. `OPERATION_TYPES` maps the job-file `type` to the class |
+| `ops.py` | The operation classes under their old import path (re-exports `operations/`) |
+| `fields.py` | Labels, units and help text for the fields several operations share; builds `OP_MENU`, `OP_TOOL_KINDS` and `OVERRIDES` from the specs. The GUI builds its forms from this |
+| `gcode.py` | Number format, comment rules and `PostError`, shared by the post and the operations |
 | `tools.py` | Tool library (`tools.toml`) and the tool plate (`Setup` of `Station`s, with D offsets) |
 | `job.py` | `Job`: units, stock, setup, named profiles, ordered operations. Reads/writes job TOML, `JOB_FORMAT` version |
-| `post/omniturn.py` | `MachineConfig` (machine.toml) and `OmniTurnPost`: one `op_*` method per operation, modal-state tracking, subroutines below M30 |
+| `post/omniturn.py` | `MachineConfig` (machine.toml) and `OmniTurnPost`: header/footer, modal-state tracking (position, feed mode, spindle, coolant, tool), motion and tool-call helpers the operations use, subroutines below M30. Dispatches each operation to its spec's `emit` |
 | `lint.py` | Checks any program (generated or hand-written) against the manual's formatting rules |
 | `backplot.py` | Interprets a program back into moves for drawing and for the travel check |
 | `stepimport.py`, `meshimport.py`, `modelimport.py` | 3D model → OD/ID profiles |
 | `cli.py` | `omniturn-cam post / lint / plot / gui / step` |
-| `gui/` | F-key step screens (job, shape, plate, processes, check, program), tool library editor, STEP dialog |
+| `gui/` | `app.py` main window and F-key bar; `screens/` one module per F-key step screen (job, shape, plate, processes, check, program); `forms.py` builds an operation's form from its fields; tool library editor, STEP dialog |
 
 ## Invariants
 
@@ -96,12 +98,25 @@ These hold for every program the post writes. Each has a test.
   the reference machine (Hardinge HLV-H with OmniTurn G4, 4000 rpm VFD).
 - The OmniTurn manuals themselves aren't in the repo (copyright). Cite pages.
 
-## Adding an operation (current procedure)
+## Adding an operation
 
-1. Dataclass in `ops.py`; add it to `OPERATION_TYPES`.
-2. Field labels/help in `fields.py` (`FIELDS` or `OVERRIDES`), a menu entry in
-   `OP_MENU`, suitable tool kinds in `OP_TOOL_KINDS`, a line in `summary()`.
-3. An `op_<kind>` method in `post/omniturn.py`, registered in `HANDLERS`.
-4. The rule it relies on, with manual page, in `docs/omniturn-post-rules.md`.
-5. Use it in a golden job (`tests/golden/jobs/`) and regenerate the expected
-   output; add focused tests in `tests/test_post.py` for its edge cases.
+1. Copy the closest module in `src/omniturn_cam/operations/` to
+   `<kind>.py`. Give it a new dataclass, `FIELDS` for any field the shared
+   table in `fields.py` doesn't label (or labels wrongly for this operation),
+   an `emit(p, op)` that writes the code with the `OmniTurnPost` helpers, and
+   `SPEC = OpSpec(...)` with a unique `kind` and the next free `order`.
+   Nothing else needs editing: the package finds the file.
+2. Write the rule it relies on, with the manual page, in
+   `docs/omniturn-post-rules.md`.
+3. Use it in a golden job (`tests/golden/jobs/`), regenerate the expected
+   output, and read every line of it. Add focused tests in
+   `tests/test_post.py` for its edge cases and errors.
+4. Append it to `MENU_ORDER` in `tests/test_operations.py` (new entries go at
+   the end, so the menu operators know doesn't shift).
+
+`tests/test_operations.py` fails if the new module is incomplete: a field with
+no operator label or help, no menu text, no tool kinds, no docstring.
+`tests/test_golden.py` fails until a golden job uses it.
+
+Never rename a `kind` or remove a module: saved job files refer to them by
+name (`tests/test_operations.py` checks the list).
