@@ -13,11 +13,13 @@ A profile is a start point followed by segments. Line segments may carry a
 corner chamfer (``c``) or radius (``r``) that blends into the NEXT line, the
 same way the OmniTurn's own ``C``/``R`` words work.
 """
+
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Iterator, Literal, Union
+from typing import Literal
 
 ArcDir = Literal["cw", "ccw"]
 
@@ -36,7 +38,7 @@ class Point:
 class Line:
     end: Point
     chamfer: float | None = None  # corner at `end`, blends into next line
-    radius: float | None = None   # corner at `end`, blends into next line
+    radius: float | None = None  # corner at `end`, blends into next line
 
     def __post_init__(self):
         if self.chamfer and self.radius:
@@ -72,7 +74,7 @@ class Arc:
         return mz + sign * h * nz, mr + sign * h * nr
 
 
-Segment = Union[Line, Arc]
+Segment = Line | Arc
 
 
 @dataclass
@@ -85,12 +87,12 @@ class Profile:
     side: Literal["od", "id"] = "od"
 
     # -- convenience builders -------------------------------------------------
-    def line(self, x: float | None = None, z: float | None = None, *, c=None, r=None) -> "Profile":
+    def line(self, x: float | None = None, z: float | None = None, *, c=None, r=None) -> Profile:
         last = self.end
         self.segments.append(Line(Point(last.x if x is None else x, last.z if z is None else z), c, r))
         return self
 
-    def arc(self, x: float, z: float, radius: float, direction: ArcDir) -> "Profile":
+    def arc(self, x: float, z: float, radius: float, direction: ArcDir) -> Profile:
         self.segments.append(Arc(Point(x, z), radius, direction))
         return self
 
@@ -150,8 +152,10 @@ def _arc_points(z0, r0, z1, r1, cz, cr, direction: ArcDir, step_deg: float):
             a1 -= 2 * math.pi
     n = max(2, int(abs(a1 - a0) / math.radians(step_deg)) + 1)
     rad = math.hypot(z0 - cz, r0 - cr)
-    return [(cz + rad * math.cos(a0 + (a1 - a0) * i / n), cr + rad * math.sin(a0 + (a1 - a0) * i / n))
-            for i in range(1, n + 1)]
+    return [
+        (cz + rad * math.cos(a0 + (a1 - a0) * i / n), cr + rad * math.sin(a0 + (a1 - a0) * i / n))
+        for i in range(1, n + 1)
+    ]
 
 
 def corner_blend(p0, p1, p2, chamfer=None, radius=None, step_deg=5.0):
@@ -183,7 +187,7 @@ def expand_moves(start: Point, segments: list[Segment], step_deg: float = 5.0) -
     pts_r: list[tuple[float, float]] = [(start.z, start.r)]
     prev = start
     pending_corner = None  # (chamfer, radius) to apply at the last point
-    for i, seg in enumerate(segments):
+    for seg in segments:
         if isinstance(seg, Line):
             if pending_corner:
                 corner = pts_r.pop()

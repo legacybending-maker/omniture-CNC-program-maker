@@ -1,0 +1,190 @@
+# Golden-output job: a flanged bushing that exercises the operations the two
+# manual examples don't - ID roughing/finishing, G74, peck drilling, tapping,
+# a die head, knurling, CSS, a loader subroutine call and raw lines.
+# Not a real part: the point is coverage, not good machining practice.
+#
+# Tool library: examples/tools.toml
+
+[job]
+name = "BUSH01"
+units = "inch"
+description = "Golden bushing"
+include_subs = "loader_subs.txt"
+
+[stock]
+diameter = 1.0
+bore = 0.25
+material = "660 bronze"
+
+[[station]]
+t = 1
+tool = "lh-turn-35"
+d = 1
+
+[[station]]
+t = 2
+tool = "drill-250"
+
+[[station]]
+t = 3
+tool = "bore-bar-250"
+d = 3
+
+[[station]]
+t = 4
+tool = "die-head-1-2-20"
+
+[[station]]
+t = 6
+tool = "tap-1-4-20"
+
+[[station]]
+t = 7
+tool = "knurl-strd-80"
+
+[[station]]
+t = 8
+tool = "cutoff-062"
+
+[profile.od]
+side = "od"
+start = { x = 0.25, z = 0 }
+seg = [
+  { x = 0.75, c = 0.02 },
+  { z = -0.4 },
+  { x = 0.95, c = 0.015 },
+  { z = -0.6 },
+  { x = 1.0 },
+]
+
+[profile.id]
+side = "id"
+start = { x = 0.5, z = 0 }
+seg = [
+  { x = 0.4375, z = -0.03125, arc = "cw", r = 0.03125 },
+  { z = -0.45 },
+  { x = 0.3125, c = 0.01 },
+  { z = -0.7 },
+  { x = 0.25 },
+]
+
+[[op]]
+type = "call_sub"
+sub = 1
+comment = "Load bar"
+
+[[op]]
+type = "face"
+t = 1
+sfm = 400
+max_rpm = 3500
+stock = 0.03
+depth_per_pass = 0.015
+feed = 0.003
+comment = "Face"
+
+[[op]]
+type = "box_rough"
+t = 1
+rpm = 2400
+x = 0.96
+z = -0.59
+depth = 0.03
+u = 0.01
+feed = 0.004
+comment = "Box rough flange"
+
+[[op]]
+type = "rough"
+t = 1
+rpm = 2400
+profile = "od"
+cycle = "g78"
+u = 0.01
+feed = 0.003
+
+[[op]]
+type = "finish"
+t = 1
+sfm = 500
+min_rpm = 800
+profile = "od"
+feed = 0.0015
+
+[[op]]
+type = "drill"
+t = 2
+rpm = 1800
+z = -0.75
+feed = 0.002
+peck = 0.1
+retract_z = 0.05
+comment = "Peck drill"
+
+[[op]]
+type = "rough"
+t = 3
+rpm = 2000
+profile = "id"
+cycle = "g75"
+depth = 0.01
+u = 0.004
+feed = 0.002
+start_z = 0.05
+
+[[op]]
+type = "finish"
+t = 3
+rpm = 2500
+profile = "id"
+feed = 0.001
+
+[[op]]
+type = "tap"
+t = 6
+rpm = 400
+x = 0
+z_start = 0.1
+z_end = -0.3
+pitch = 0.05
+
+[[op]]
+type = "axial"
+t = 4
+rpm = 300
+x = 0
+z_start = 0.1
+z_end = -0.35
+feed = 0.05
+sync = true
+dwell = 0.2
+stop_after = "m01"
+comment = "Reset die head"
+
+[[op]]
+type = "radial"
+t = 7
+rpm = 600
+z = -0.45
+x_start = 1.05
+x_end = 0.735
+feed = 0.002
+dwell = 0.3
+retract = "feed"
+comment = "Knurl"
+
+[[op]]
+type = "raw"
+code = """
+m91
+m32
+"""
+comment = "Wait for parts catcher"
+
+[[op]]
+type = "cutoff"
+t = 8
+rpm = 1500
+z = -0.662
+feed = 0.0015
+stop_spindle_after = true

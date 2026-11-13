@@ -1,10 +1,20 @@
 """Builds the fill-in-the-blank form for one operation from fields.py metadata."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGroupBox, QLabel, QLineEdit,
-                               QPlainTextEdit, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFormLayout,
+    QGroupBox,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..fields import OP_MENU, form_fields, op_kind
 from .widgets import UNIT_SUFFIX, NumberEdit
@@ -82,8 +92,13 @@ class OperationForm(QWidget):
             ch.toggled.connect(lambda on: self._set(name, on))
             return ch
         if info.kind in NUMERIC:
-            ne = NumberEdit(v, optional=info.optional, integer=info.kind in ("rpm", "int"),
-                            suffix=units.get(info.kind, ""), placeholder=info.blank if info.optional else "")
+            ne = NumberEdit(
+                v,
+                optional=info.optional,
+                integer=info.kind in ("rpm", "int"),
+                suffix=units.get(info.kind, ""),
+                placeholder=info.blank if info.optional else "",
+            )
             ne.valueChanged.connect(lambda val: self._set(name, val))
             return ne
         if info.kind == "multiline":

@@ -1,4 +1,5 @@
 """OpenCascade kernel through the cadquery-ocp package (standalone app)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,6 +12,7 @@ from . import EdgeInfo, FaceInfo, SolidInfo
 def _cast(kind: str, shape):
     """TopoDS.Solid / Face / Edge downcast; OCP 7.x names them Solid_s etc."""
     from OCP.TopoDS import TopoDS
+
     fn = getattr(TopoDS, kind + "_s", None) or getattr(TopoDS, kind)
     return fn(shape)
 
@@ -21,6 +23,7 @@ def _v(p):
 
 def _explore(shape, what, kind):
     from OCP.TopExp import TopExp_Explorer
+
     exp = TopExp_Explorer(shape, what)
     while exp.More():
         yield _cast(kind, exp.Current())
@@ -40,6 +43,7 @@ class OCPKernel:
         from OCP.TopAbs import TopAbs_SOLID
 
         from ..stepimport import StepImportError
+
         reader = STEPControl_Reader()
         if reader.ReadFile(str(path)) != IFSelect_RetDone:
             raise StepImportError(f"could not read {Path(path).name} as a STEP file")
@@ -51,15 +55,28 @@ class OCPKernel:
             box = Bnd_Box()
             BRepBndLib.Add_s(solid, box)
             lo, hi = box.CornerMin(), box.CornerMax()
-            out.append(SolidInfo(len(out), f"Solid {len(out) + 1}", abs(props.Mass()),
-                                 (hi.X() - lo.X(), hi.Y() - lo.Y(), hi.Z() - lo.Z()), solid))
+            out.append(
+                SolidInfo(
+                    len(out),
+                    f"Solid {len(out) + 1}",
+                    abs(props.Mass()),
+                    (hi.X() - lo.X(), hi.Y() - lo.Y(), hi.Z() - lo.Z()),
+                    solid,
+                )
+            )
         return out
 
     def faces(self, solid) -> list[FaceInfo]:
         from OCP.BRepAdaptor import BRepAdaptor_Surface
         from OCP.BRepGProp import BRepGProp
-        from OCP.GeomAbs import (GeomAbs_Cone, GeomAbs_Cylinder, GeomAbs_Plane, GeomAbs_Sphere,
-                                 GeomAbs_SurfaceOfRevolution, GeomAbs_Torus)
+        from OCP.GeomAbs import (
+            GeomAbs_Cone,
+            GeomAbs_Cylinder,
+            GeomAbs_Plane,
+            GeomAbs_Sphere,
+            GeomAbs_SurfaceOfRevolution,
+            GeomAbs_Torus,
+        )
         from OCP.GProp import GProp_GProps
         from OCP.TopAbs import TopAbs_FACE
 
@@ -96,6 +113,7 @@ class OCPKernel:
         from OCP.TopAbs import TopAbs_EDGE
 
         from ..stepimport import StepImportError
+
         sec = BRepAlgoAPI_Section(solid, gp_Pln(gp_Pnt(*origin), gp_Dir(*normal)))
         sec.Build()
         if not sec.IsDone():
@@ -104,8 +122,7 @@ class OCPKernel:
         for e in _explore(sec.Shape(), TopAbs_EDGE, "Edge"):
             c = BRepAdaptor_Curve(e)
             typ = c.GetType()
-            info = EdgeInfo("other", c.FirstParameter(), c.LastParameter(),
-                            lambda t, c=c: _v(c.Value(t)))
+            info = EdgeInfo("other", c.FirstParameter(), c.LastParameter(), lambda t, c=c: _v(c.Value(t)))
             if typ == GeomAbs_Line:
                 info.kind = "line"
             elif typ == GeomAbs_Circle:

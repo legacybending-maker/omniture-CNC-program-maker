@@ -1,11 +1,22 @@
 """F2 -> Import from STEP: pick the solid, pick which end is the face, preview."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
-                               QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout)
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from ..backplot import draw_profile
 from .widgets import PlotCanvas, fmt_num
@@ -15,6 +26,7 @@ class StepImportDialog(QDialog):
     def __init__(self, path: str, job, parent=None):
         super().__init__(parent)
         from ..modelimport import is_mesh, list_bodies
+
         self.setWindowTitle(f"Import shape - {Path(path).name}")
         self.resize(1000, 640)
         self.path, self.job = path, job
@@ -73,6 +85,7 @@ class StepImportDialog(QDialog):
     def _run(self):
         from ..modelimport import import_model
         from ..stepimport import StepImportError
+
         self.notes.clear()
         try:
             self.result = import_model(self.path, self.solid.currentData(), self.job.units, self.flip.isChecked())
@@ -84,8 +97,10 @@ class StepImportDialog(QDialog):
         r = self.result
         self.ok.setEnabled(True)
         unit = "in" if self.job.units == "inch" else "mm"
-        self.info.setText(f"{fmt_num(r.max_dia)} {unit} max dia  x  {fmt_num(r.length)} {unit} long"
-                          + ("  -  has a bore" if r.id else ""))
+        self.info.setText(
+            f"{fmt_num(r.max_dia)} {unit} max dia  x  {fmt_num(r.length)} {unit} long"
+            + ("  -  has a bore" if r.id else "")
+        )
         bigger = r.max_dia > self.job.stock.diameter + 1e-9
         self.set_stock.setText(f"Set to {fmt_num(r.max_dia)} (now {fmt_num(self.job.stock.diameter)})")
         self.set_stock.setChecked(bigger)
@@ -107,6 +122,7 @@ class StepImportDialog(QDialog):
     def apply(self):
         """Put the imported shapes into the job. Returns the names added."""
         from ..stepimport import extend_to_stock
+
         r = self.result
         if self.set_stock.isChecked():
             self.job.stock.diameter = r.max_dia

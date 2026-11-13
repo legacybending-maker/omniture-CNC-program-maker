@@ -16,18 +16,20 @@ Two kernels implement that:
 Both wrap the same OpenCascade underneath, so they give the same profiles; the
 test suite runs the same STEP files through each one it can import.
 """
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Protocol
+from typing import Protocol
 
 
 @dataclass
 class SolidInfo:
     index: int
     name: str
-    volume: float          # mm^3
-    size: tuple            # bounding box dx, dy, dz in mm
+    volume: float  # mm^3
+    size: tuple  # bounding box dx, dy, dz in mm
     shape: object = field(repr=False, default=None)
 
 
@@ -35,6 +37,7 @@ class SolidInfo:
 class FaceInfo:
     """kind: cylinder | cone | torus | revolution | plane | sphere | other.
     axis = (point, unit dir) for the round kinds; normal for planes; center for spheres."""
+
     kind: str
     area: float
     axis: tuple | None = None
@@ -47,6 +50,7 @@ class EdgeInfo:
     """One edge of a planar cut. value(t) gives the 3D point (mm) at parameter t.
     kind: line | circle | other; circles also give centre (3D) and radius, and
     their parameter is the angle in radians."""
+
     kind: str
     t0: float
     t1: float
@@ -75,13 +79,16 @@ def get(name: str | None = None) -> Kernel:
         try:
             if n == "ocp":
                 from .ocp import OCPKernel
+
                 return OCPKernel()
             if n == "freecad":
                 from .freecad import FreeCADKernel
+
                 return FreeCADKernel()
             raise KernelUnavailable(f"unknown geometry kernel {n!r}")
         except ImportError as e:
             errors.append(f"{n}: {e}")
     raise KernelUnavailable(
-        "STEP import needs OpenCascade: pip install cadquery-ocp (or pip install -e \".[step]\"), "
-        "or run inside FreeCAD. (" + "; ".join(errors) + ")")
+        'STEP import needs OpenCascade: pip install cadquery-ocp (or pip install -e ".[step]"), '
+        "or run inside FreeCAD. (" + "; ".join(errors) + ")"
+    )

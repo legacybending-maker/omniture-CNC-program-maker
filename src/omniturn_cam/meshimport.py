@@ -16,6 +16,7 @@ or cylinders, so this module:
 
 Accuracy is limited by the mesh: check the imported numbers against the print.
 """
+
 from __future__ import annotations
 
 import math
@@ -30,7 +31,7 @@ import numpy as np
 from .stepimport import ImportResult, Seg, StepImportError, finish_loop
 
 MESH_SUFFIXES = {".stl", ".3mf"}
-FIT_TOL = 0.02          # mm: how far the fitted lines/arcs may stray from the mesh outline
+FIT_TOL = 0.02  # mm: how far the fitted lines/arcs may stray from the mesh outline
 UNIT_MM = {"micron": 0.001, "millimeter": 1.0, "centimeter": 10.0, "inch": 25.4, "foot": 304.8, "meter": 1000.0}
 
 
@@ -38,8 +39,8 @@ UNIT_MM = {"micron": 0.001, "millimeter": 1.0, "centimeter": 10.0, "inch": 25.4,
 class MeshBody:
     index: int
     name: str
-    vertices: np.ndarray = field(repr=False)     # (n, 3) mm
-    triangles: np.ndarray = field(repr=False)    # (m, 3) int
+    vertices: np.ndarray = field(repr=False)  # (n, 3) mm
+    triangles: np.ndarray = field(repr=False)  # (m, 3) int
 
     @property
     def size(self):
@@ -65,8 +66,9 @@ def read_stl(path) -> list[MeshBody]:
     data = Path(path).read_bytes()
     n = struct.unpack_from("<I", data, 80)[0] if len(data) >= 84 else 0
     if len(data) == 84 + 50 * n:
-        rec = np.frombuffer(data, dtype=np.dtype([("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")]),
-                            count=n, offset=84)
+        rec = np.frombuffer(
+            data, dtype=np.dtype([("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")]), count=n, offset=84
+        )
         tris = rec["v"].astype(np.float64)
     else:
         nums = re.findall(rb"vertex\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)", data)
@@ -86,15 +88,18 @@ def read_3mf(path) -> list[MeshBody]:
     unit = re.search(rb'<model[^>]*\bunit="([a-z]+)"', xml)
     scale = UNIT_MM.get(unit.group(1).decode() if unit else "millimeter", 1.0)
     objects = {}
-    for m in re.finditer(rb'<object\b([^>]*)>(.*?)</object>', xml, re.S):
+    for m in re.finditer(rb"<object\b([^>]*)>(.*?)</object>", xml, re.S):
         attrs, body = m.group(1), m.group(2)
         oid = re.search(rb'\bid="(\d+)"', attrs).group(1)
         oname = re.search(rb'\bname="([^"]*)"', attrs)
         verts = re.findall(rb'<vertex\s+x="([^"]+)"\s+y="([^"]+)"\s+z="([^"]+)"', body)
         tris = re.findall(rb'<triangle\s+v1="(\d+)"\s+v2="(\d+)"\s+v3="(\d+)"', body)
         if verts and tris:
-            objects[oid] = (oname.group(1).decode(errors="replace") if oname else f"Object {int(oid)}",
-                            np.array(verts, dtype=np.float64) * scale, np.array(tris, dtype=np.int64))
+            objects[oid] = (
+                oname.group(1).decode(errors="replace") if oname else f"Object {int(oid)}",
+                np.array(verts, dtype=np.float64) * scale,
+                np.array(tris, dtype=np.int64),
+            )
     bodies = []
     items = re.findall(rb'<item\b[^>]*\bobjectid="(\d+)"(?:[^>]*\btransform="([^"]+)")?', xml)
     for oid, tr in items or [(k, b"") for k in objects]:
@@ -144,9 +149,6 @@ def find_mesh_axis(body: MeshBody, tol_mm: float = 0.05):
     p, n, a = _facets(body)
     M = (n * a[:, None]).T @ n
     vals, vecs = np.linalg.eigh(M)
-    gaps = [abs(vals[0] - vals[1]) + abs(vals[0] - vals[2]),
-            abs(vals[1] - vals[0]) + abs(vals[1] - vals[2]),
-            abs(vals[2] - vals[0]) + abs(vals[2] - vals[1])]
     # the distinct eigenvalue is the one farthest from the other two
     k = int(np.argmax([min(abs(vals[i] - vals[j]) for j in range(3) if j != i) for i in range(3)]))
     d = vecs[:, k] / np.linalg.norm(vecs[:, k])
@@ -157,7 +159,7 @@ def find_mesh_axis(body: MeshBody, tol_mm: float = 0.05):
     # lies in its meridian plane, while a facet's normal only does at the facet's middle.
     V, F = body.vertices, body.triangles
     tv = V[F]
-    fn = np.cross(tv[:, 1] - tv[:, 0], tv[:, 2] - tv[:, 0])          # area-weighted facet normals
+    fn = np.cross(tv[:, 1] - tv[:, 0], tv[:, 2] - tv[:, 0])  # area-weighted facet normals
     vn = np.zeros_like(V)
     for k in range(3):
         np.add.at(vn, F[:, k], fn)
@@ -175,7 +177,7 @@ def find_mesh_axis(body: MeshBody, tol_mm: float = 0.05):
     q2 = np.stack([p[side] @ e1, p[side] @ e2], 1)
     n2 = np.stack([n[side] @ e1, n[side] @ e2], 1)
     n2 /= np.linalg.norm(n2, axis=1)[:, None]
-    t2 = np.stack([-n2[:, 1], n2[:, 0]], 1)            # perpendicular to the normal, in the end view
+    t2 = np.stack([-n2[:, 1], n2[:, 0]], 1)  # perpendicular to the normal, in the end view
     w = a[side].copy()
     c2 = (q2 * w[:, None]).sum(0) / w.sum()
     for _ in range(8):
@@ -221,14 +223,14 @@ def _refine_center(V, d, e1, e2, c2, rounds=3):
             pts = xy[grp]
             ang = np.sort(np.arctan2(pts[:, 1] - c2[1], pts[:, 0] - c2[0]))
             gaps = np.diff(np.concatenate([ang, ang[:1] + 2 * np.pi]))
-            if gaps.max() > np.pi / 2:          # ring doesn't go most of the way round
+            if gaps.max() > np.pi / 2:  # ring doesn't go most of the way round
                 continue
             A = np.stack([pts[:, 0], pts[:, 1], np.ones(len(pts))], 1)
-            sol, *_ = np.linalg.lstsq(A, (pts ** 2).sum(1), rcond=None)
+            sol, *_ = np.linalg.lstsq(A, (pts**2).sum(1), rcond=None)
             cc = sol[:2] / 2
             rr = math.sqrt(max(sol[2] + cc @ cc, 0))
             if np.abs(np.linalg.norm(pts - cc, axis=1) - rr).max() > max(1e-3 * rr, 0.01):
-                continue                         # not a clean circle (notch, slot)
+                continue  # not a clean circle (notch, slot)
             centres.append(cc)
             weights.append(len(grp))
         if not centres:
@@ -245,7 +247,7 @@ def _section(body: MeshBody, c, d, u):
     V, F = body.vertices, body.triangles
     nrm = np.cross(d, u)
     s = (V - c) @ nrm
-    s = np.where(np.abs(s) < 1e-9, 1e-9, s)           # nothing exactly on the plane
+    s = np.where(np.abs(s) < 1e-9, 1e-9, s)  # nothing exactly on the plane
     sf = s[F]
     cross_tri = ~((sf > 0).all(1) | (sf < 0).all(1))
     F, sf = F[cross_tri], sf[cross_tri]
@@ -261,7 +263,7 @@ def _section(body: MeshBody, c, d, u):
         hit = (sa > 0) != (sb > 0)
         pts.append(np.where(hit[:, None], pt, np.nan))
         keys.append(np.where(hit, lo * (len(V) + 1) + hi, -1))
-    P = np.stack(pts, 1)          # (k, 3 edges, 3)
+    P = np.stack(pts, 1)  # (k, 3 edges, 3)
     K = np.stack(keys, 1)
     adj: dict[int, list[int]] = {}
     where: dict[int, tuple] = {}
@@ -297,7 +299,7 @@ def _section(body: MeshBody, c, d, u):
             seen.add(nxt)
             cur = nxt
         if len(chain) > 2 and s0 in adj.get(chain[-1], []):
-            chain.append(s0)   # closed
+            chain.append(s0)  # closed
         chains.append([local(where[k]) for k in chain])
 
     # keep the r >= 0 half; split chains where they cross the axis
@@ -367,7 +369,7 @@ def _lsq_circle(Q):
 def _line_ok(P, i, j, tol):
     if j - i >= 2:
         # a straight run doesn't turn: stop at the first chord that bends away (start of an arc)
-        seg = np.diff(P[i:j + 1], axis=0)
+        seg = np.diff(P[i : j + 1], axis=0)
         h = np.unwrap(np.arctan2(seg[:, 1], seg[:, 0]))
         if np.abs(np.diff(h)).max() > math.radians(3):
             return False
@@ -375,7 +377,7 @@ def _line_ok(P, i, j, tol):
     L = np.linalg.norm(b - a)
     if L < 1e-9:
         return False
-    seg = P[i:j + 1] - a
+    seg = P[i : j + 1] - a
     dev = np.abs(seg[:, 0] * (b - a)[1] - seg[:, 1] * (b - a)[0]) / L
     return bool(dev.max() <= tol)
 
@@ -383,24 +385,24 @@ def _line_ok(P, i, j, tol):
 def _arc_ok(P, i, j, tol):
     if j - i < 4:
         return None
-    circ = _lsq_circle(P[i:j + 1])
+    circ = _lsq_circle(P[i : j + 1])
     if circ is None:
         return None
     (cx, cy), r = circ
     if r > 5000:
         return None
-    dev = np.abs(np.hypot(P[i:j + 1, 0] - cx, P[i:j + 1, 1] - cy) - r)
+    dev = np.abs(np.hypot(P[i : j + 1, 0] - cx, P[i : j + 1, 1] - cy) - r)
     if dev.max() > tol:
         return None
     # the points must sweep steadily one way round, or it's not an arc
-    ang = np.unwrap(np.arctan2(P[i:j + 1, 1] - cy, P[i:j + 1, 0] - cx))
+    ang = np.unwrap(np.arctan2(P[i : j + 1, 1] - cy, P[i : j + 1, 0] - cx))
     steps = np.diff(ang)
     if not ((steps > -1e-9).all() or (steps < 1e-9).all()):
         return None
     # ...in small steps with no sharp turns: a few points round a corner aren't an arc
     if np.abs(steps).max() > math.radians(20):
         return None
-    seg = np.diff(P[i:j + 1], axis=0)
+    seg = np.diff(P[i : j + 1], axis=0)
     # a straight face is one long gap between cut points; a curve is many short ones that
     # change gradually. Reject a run where one gap is far longer than the gap beside it.
     chord = np.linalg.norm(seg, axis=1)
@@ -439,7 +441,7 @@ def fit_polyline(pts, tol=FIT_TOL) -> list[Seg]:
         while j < n:
             got = _arc_ok(P, i, j, tol)
             if got is None:
-                if j - j_arc > 6:      # give up once several extensions in a row fail
+                if j - j_arc > 6:  # give up once several extensions in a row fail
                     break
             else:
                 j_arc, arc = j, got
@@ -476,10 +478,12 @@ def _merge_arcs(segs: list[Seg], P, tol) -> list[Seg]:
     for k, s in enumerate(out):
         if s.kind != "arc":
             continue
+
         def onto(p):
             dz, dr = p[0] - s.center[0], p[1] - s.center[1]
             L = math.hypot(dz, dr) or 1.0
             return (s.center[0] + dz / L * s.radius, s.center[1] + dr / L * s.radius)
+
         s.p0, s.p1 = onto(s.p0), onto(s.p1)
         if k > 0:
             out[k - 1].p1 = s.p0
@@ -489,8 +493,9 @@ def _merge_arcs(segs: list[Seg], P, tol) -> list[Seg]:
 
 
 # ----------------------------------------------------------------------------- import
-def import_mesh(path, body_index: int | None = None, units: str = "inch", flip: bool = False,
-                tol: float = FIT_TOL) -> ImportResult:
+def import_mesh(
+    path, body_index: int | None = None, units: str = "inch", flip: bool = False, tol: float = FIT_TOL
+) -> ImportResult:
     bodies = read_mesh(path)
     if body_index is None:
         if len(bodies) > 1:
@@ -500,8 +505,10 @@ def import_mesh(path, body_index: int | None = None, units: str = "inch", flip: 
     c, d, odd = find_mesh_axis(body)
     warnings = ["imported from a mesh: sizes are only as good as the mesh. Check them against the print"]
     if odd > 0.002:
-        warnings.append(f"about {odd * 100:.0f}% of the surface isn't turned (flats, slots, clamp areas). "
-                        "The profile is taken where the part is fullest - machine those features separately")
+        warnings.append(
+            f"about {odd * 100:.0f}% of the surface isn't turned (flats, slots, clamp areas). "
+            "The profile is taken where the part is fullest - machine those features separately"
+        )
 
     # cut through rings of vertices: aim the cut at the outermost vertices' angles
     ref = np.array([1.0, 0, 0]) if abs(d[0]) < 0.9 else np.array([0, 1.0, 0])
@@ -537,5 +544,6 @@ def import_mesh(path, body_index: int | None = None, units: str = "inch", flip: 
     if areas and (max(areas) - min(areas)) > 1e-3 * max(areas) and odd <= 0.002:
         warnings.append("the outline changes around the axis - the fullest cut was used")
     loop = fit_polyline(main, tol)
-    return finish_loop(loop, flip, units, warnings, body.name, round(math.degrees(th) % 360, 1),
-                       tol=max(10 * tol, 0.05))
+    return finish_loop(
+        loop, flip, units, warnings, body.name, round(math.degrees(th) % 360, 1), tol=max(10 * tol, 0.05)
+    )

@@ -2,6 +2,7 @@
 and the contour each G75/G78 cycle roughs to. Interpreting the output (rather
 than drawing from the job) means the plot shows what the machine will be told.
 """
+
 from __future__ import annotations
 
 import re
@@ -14,7 +15,7 @@ WORD = re.compile(r"([a-z}])(-?\d*\.?\d*)")
 
 @dataclass
 class Path:
-    kind: str                    # "rapid" | "feed" | "contour" | "drill"
+    kind: str  # "rapid" | "feed" | "contour" | "drill"
     tool: int | None
     start: Point
     segments: list = field(default_factory=list)
@@ -64,8 +65,9 @@ def interpret(program: str, arc_codes=None) -> list[Path]:
                 code = next(c for c in g if c in arc_dir)
                 p.segments.append(Arc(Point(nx, nz), float(d["r"]), arc_dir[code]))
             else:
-                p.segments.append(Line(Point(nx, nz), float(d["c"]) if d.get("c") else None,
-                                       float(d["r"]) if d.get("r") else None))
+                p.segments.append(
+                    Line(Point(nx, nz), float(d["c"]) if d.get("c") else None, float(d["r"]) if d.get("r") else None)
+                )
             cx, cz = nx, nz
         return p
 
@@ -116,8 +118,13 @@ def interpret(program: str, arc_codes=None) -> list[Path]:
         if arc_code:
             current.segments.append(Arc(Point(nx, nz), float(d["r"]), arc_dir[arc_code]))
         else:
-            current.segments.append(Line(Point(nx, nz), float(d["c"]) if d.get("c") else None,
-                                         float(d["r"]) if d.get("r") and kind == "feed" else None))
+            current.segments.append(
+                Line(
+                    Point(nx, nz),
+                    float(d["c"]) if d.get("c") else None,
+                    float(d["r"]) if d.get("r") and kind == "feed" else None,
+                )
+            )
         x, z = nx, nz
     return paths
 
@@ -155,8 +162,7 @@ def draw_profile(ax, profile, stock_dia: float | None = None, highlight: int | N
     """Draw a part shape for the shape-entry screen. highlight = segment index."""
     if stock_dia:
         zmin = min(profile.bounds()[2], 0) - 0.1 * stock_dia
-        ax.fill_between([zmin, max(profile.bounds()[3], 0)], 0, stock_dia / 2,
-                        color="#d9dde3", alpha=0.6, lw=0)
+        ax.fill_between([zmin, max(profile.bounds()[3], 0)], 0, stock_dia / 2, color="#d9dde3", alpha=0.6, lw=0)
     pts = profile.polyline()
     ax.plot([p[0] for p in pts], [p[1] / 2 for p in pts], lw=2, color="#2a6fdb")
     ax.plot([profile.start.z], [profile.start.r], "o", color="#2e9e5b", ms=5)
@@ -165,8 +171,9 @@ def draw_profile(ax, profile, stock_dia: float | None = None, highlight: int | N
         start = profile.start if highlight == 0 else segs[highlight - 1].end
         seg = segs[highlight]
         # draw the highlighted segment as a sharp line/arc on its own
-        hp = expand_moves(start, [type(seg)(seg.end, seg.radius, seg.direction)] if isinstance(seg, Arc)
-                          else [Line(seg.end)])
+        hp = expand_moves(
+            start, [type(seg)(seg.end, seg.radius, seg.direction)] if isinstance(seg, Arc) else [Line(seg.end)]
+        )
         ax.plot([p[0] for p in hp], [p[1] / 2 for p in hp], lw=4, color="#e0782c", alpha=0.7)
     _finish_axes(ax)
 
@@ -189,6 +196,7 @@ def _finish_axes(ax):
 
 def plot(program: str, out_file: str, stock_dia: float | None = None, title: str = "") -> None:
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 

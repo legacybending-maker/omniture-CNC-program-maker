@@ -1,0 +1,17 @@
+# Programs that have been proved out on the real machine.
+#
+# One entry per golden job (file name without .toml). The hash is the SHA-256
+# of tests/golden/expected/<name>.cnc as it was when it ran on the machine.
+# tests/test_golden.py fails if a listed program's output changes, so a change
+# to proven G-code can never slip through as just another updated test file.
+#
+# Only the machine owner adds entries, after running the program on the lathe
+# (single block + F4 Verify first). To change a proven program on purpose:
+# delete its entry in the same PR, say so in the PR, and re-prove it before
+# adding it back.
+#
+# [manual_g75]
+# sha256 = "..."
+# date = 2026-11-20
+# machine = "Hardinge HLV-H OmniTurn G4"
+# notes = "6061, single block, then full cycle"

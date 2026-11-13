@@ -1,4 +1,5 @@
 """Small reusable widgets: numeric entry with blanks, embedded matplotlib canvas."""
+
 from __future__ import annotations
 
 import matplotlib
@@ -10,10 +11,26 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QWidget
 matplotlib.rcParams.update({"font.size": 8, "legend.fontsize": 8})
 
 UNIT_SUFFIX = {
-    "inch": {"dia": "in dia", "z": "in", "len": "in", "feed": "in/rev", "feed_ipm": "in/min",
-             "rpm": "rpm", "sfm": "sfm", "sec": "sec"},
-    "metric": {"dia": "mm dia", "z": "mm", "len": "mm", "feed": "mm/rev", "feed_ipm": "mm/min",
-               "rpm": "rpm", "sfm": "m/min", "sec": "sec"},
+    "inch": {
+        "dia": "in dia",
+        "z": "in",
+        "len": "in",
+        "feed": "in/rev",
+        "feed_ipm": "in/min",
+        "rpm": "rpm",
+        "sfm": "sfm",
+        "sec": "sec",
+    },
+    "metric": {
+        "dia": "mm dia",
+        "z": "mm",
+        "len": "mm",
+        "feed": "mm/rev",
+        "feed_ipm": "mm/min",
+        "rpm": "rpm",
+        "sfm": "m/min",
+        "sec": "sec",
+    },
 }
 
 

@@ -1,4 +1,5 @@
 """Tests anchored to the worked examples in the OmniTurn operator manual."""
+
 from pathlib import Path
 
 import pytest
@@ -29,8 +30,10 @@ def make_job(lib, profiles=None, ops=None, units="inch", stock=0.75, bore=None):
 
 
 # --------------------------------------------------------------------- format
-@pytest.mark.parametrize("v,s", [(0, "0"), (0.5, ".5"), (-0.5, "-.5"), (1.0, "1"),
-                                 (0.34300, ".343"), (-0.0000001, "0"), (12.34567, "12.3457")])
+@pytest.mark.parametrize(
+    "v,s",
+    [(0, "0"), (0.5, ".5"), (-0.5, "-.5"), (1.0, "1"), (0.34300, ".343"), (-0.0000001, "0"), (12.34567, "12.3457")],
+)
 def test_number_format(v, s):
     assert fmt(v, 4) == s
 
@@ -45,8 +48,7 @@ def test_manual_g75_contour_subroutine_matches_manual(lib):
     job = load_job(EX / "manual_g75.toml", lib)
     code = post(job)
     sub = code.split("}1\n", 1)[1].split("m99", 1)[0].split()
-    assert sub == ["x0z0", "x.343c.125", "z-.3", "x.406", "g02x.406z-.487r.0935",
-                   "x.375", "z-.75", "x.75"]
+    assert sub == ["x0z0", "x.343c.125", "z-.3", "x.406", "g02x.406z-.487r.0935", "x.375", "z-.75", "x.75"]
     assert "g75i.02u.005f.003p1" in code
 
 
@@ -105,8 +107,7 @@ def test_job_name_limited_to_8_chars(lib):
 def test_lint_catches_rule_breaks():
     bad = "n10g90g72\ng2x1z1\nm03m08\nt1\nz.1\nx1,z2\nt40\nx0z0\ng75i.1u.01f.003p7\n"
     msgs = " | ".join(p.message for p in lint(bad))
-    for frag in ["N sequence", "two digits", "one M code", "both X and Z", "commas",
-                 "out of range", "never defined"]:
+    for frag in ["N sequence", "two digits", "one M code", "both X and Z", "commas", "out of range", "never defined"]:
         assert frag in msgs, frag
 
 
@@ -196,27 +197,46 @@ def _thread_job(lib, op):
 
 def test_g33_matches_manual_half_13_example(lib):
     """p2.25: 1/2-13, major .495, minor .408, I.02 -> start X.475 at Z.2, G33X.408Z-.5I.02K.077P."""
-    op = Thread(t=4, rpm=500, major=0.495, minor=0.408, z_end=-0.5, lead=0.077,
-                first_depth=0.02, pullout=True)
+    op = Thread(t=4, rpm=500, major=0.495, minor=0.408, z_end=-0.5, lead=0.077, first_depth=0.02, pullout=True)
     code = post(_thread_job(lib, op))
     lines = code.splitlines()
     i = lines.index("g33x.408z-.5i.02k.077p")
     assert lines[i - 1] == "x.475" and "z.2" in lines[i - 2]
-    assert "(THREAD ABOUT 19 PASSES)" in code   # (.087/.02)^2 = 18.9
+    assert "(THREAD ABOUT 19 PASSES)" in code  # (.087/.02)^2 = 18.9
 
 
 def test_g33_multi_start_offsets_z_by_pitch(lib):
     """p2.28: three-start 20 pitch: K.15, starts at Z.2, .25, .3."""
-    op = Thread(t=4, rpm=500, major=0.495, minor=0.424, z_end=-0.5, lead=0.05, starts=3,
-                first_depth=0.01, pullout=True, start_x=0.494)
+    op = Thread(
+        t=4,
+        rpm=500,
+        major=0.495,
+        minor=0.424,
+        z_end=-0.5,
+        lead=0.05,
+        starts=3,
+        first_depth=0.01,
+        pullout=True,
+        start_x=0.494,
+    )
     code = post(_thread_job(lib, op))
     assert code.count("g33x.424z-.5i.01k.15p") == 3
     assert "z.25\n" in code and "z.3\n" in code
 
 
 def test_g33_spring_pass_angle_infeed_and_lint(lib):
-    op = Thread(t=4, rpm=500, major=0.5, minor=0.424, z_end=-0.5, lead=0.05, first_depth=0.008,
-                pullout=True, infeed_angle=29, spring_passes=1)
+    op = Thread(
+        t=4,
+        rpm=500,
+        major=0.5,
+        minor=0.424,
+        z_end=-0.5,
+        lead=0.05,
+        first_depth=0.008,
+        pullout=True,
+        infeed_angle=29,
+        spring_passes=1,
+    )
     code = post(_thread_job(lib, op))
     assert "g33x.424z-.5i.008k.05pc29\ng33x.424z-.5i.008k.05pc29o" in code
     assert not [p for p in lint(code) if p.severity == "error"]
@@ -227,15 +247,16 @@ def test_g33_spring_pass_angle_infeed_and_lint(lib):
 def test_g33_feed_limit_and_fixed_rpm(lib):
     op = Thread(t=4, rpm=3000, major=1.0, minor=0.8, z_end=-0.5, lead=0.125, first_depth=0.02)
     with pytest.raises(PostError, match="300"):
-        post(_thread_job(lib, op))      # 3000 x .125 = 375 ipm
+        post(_thread_job(lib, op))  # 3000 x .125 = 375 ipm
     op.rpm, op.sfm = None, 300
     with pytest.raises(PostError, match="fixed RPM"):
         post(_thread_job(lib, op))
 
 
 def test_g33_internal_thread_starts_inside(lib):
-    op = Thread(t=4, rpm=400, side="id", major=0.9375, minor=0.8783, z_end=-0.75, lead=0.05,
-                first_depth=0.01, infeed_angle=29)
+    op = Thread(
+        t=4, rpm=400, side="id", major=0.9375, minor=0.8783, z_end=-0.75, lead=0.05, first_depth=0.01, infeed_angle=29
+    )
     code = post(_thread_job(lib, op))
     assert "g33x.9375z-.75i.01k.05c29" in code and "\nx.8883\n" in code
 
@@ -251,7 +272,7 @@ def test_include_file_appended_and_contour_renumbered(lib, tmp_path):
     job.include_subs = str(ext)
     job.operations.append(CallSub(sub=1, comment="Load bar"))
     code = post(job)
-    assert "g75i.02u.005f.003p3" in code and "\n}3\n" in code   # moved past 1 and 2
+    assert "g75i.02u.005f.003p3" in code and "\n}3\n" in code  # moved past 1 and 2
     assert code.rstrip().endswith("}2\nm11\nm99")
     assert "m98p1" in code
     assert not [p for p in lint(code) if p.severity == "error"]
@@ -285,6 +306,7 @@ def test_every_operation_round_trips_through_a_saved_job(lib, tmp_path):
     from omniturn_cam.fields import OP_MENU
     from omniturn_cam.job import save_job
     from omniturn_cam.ops import OPERATION_TYPES
+
     assert set(OP_MENU) == set(OPERATION_TYPES)
     job = load_job(EX / "manual_g75.toml", lib)
     job.operations = [new_operation(k, 1) for k in OPERATION_TYPES]
@@ -295,10 +317,17 @@ def test_every_operation_round_trips_through_a_saved_job(lib, tmp_path):
 
 def test_rough_warns_on_shape_that_turns_back_toward_face(lib):
     # cup: OD sleeve, then back up toward the face inside it (slot cut from the back)
-    prof = Profile(Point(0, 0), name="od").line(x=0.65).line(z=-0.84).line(x=0.545).line(z=-0.04) \
-        .line(x=0.415).line(z=-0.915).line(x=0.75)
+    prof = (
+        Profile(Point(0, 0), name="od")
+        .line(x=0.65)
+        .line(z=-0.84)
+        .line(x=0.545)
+        .line(z=-0.04)
+        .line(x=0.415)
+        .line(z=-0.915)
+        .line(x=0.75)
+    )
     assert prof.undercut_z() == -0.84
     warns = []
-    post(make_job(lib, {"od": prof}, [Rough(t=1, rpm=2000, profile="od", start_x=0.75, start_z=0.05)]),
-         warnings=warns)
+    post(make_job(lib, {"od": prof}, [Rough(t=1, rpm=2000, profile="od", start_x=0.75, start_z=0.05)]), warnings=warns)
     assert any("turns back" in w for w in warns)

@@ -4,25 +4,36 @@ Every test runs once per geometry kernel that imports: OCP in the normal dev
 environment, FreeCAD when pytest runs under FreeCAD's Python. Both must give
 the same profiles.
 """
+
 from functools import partial
 from pathlib import Path
 
 import pytest
 
-from omniturn_cam.geometry import Arc, Line  # noqa: F401
 from omniturn_cam import stepimport
+from omniturn_cam.geometry import Arc, Line  # noqa: F401
 from omniturn_cam.stepimport import StepImportError
 
 DATA = Path(__file__).parent / "data"
 
-MANUAL_OD = [("L", .093, 0), ("L", .343, -.125), ("L", .343, -.3), ("L", .406, -.3),
-             ("A", .593, -.3935, "ccw"), ("A", .406, -.487, "ccw"), ("L", .375, -.487),
-             ("L", .375, -.75), ("L", .75, -.75), ("L", .75, -1.0)]
+MANUAL_OD = [
+    ("L", 0.093, 0),
+    ("L", 0.343, -0.125),
+    ("L", 0.343, -0.3),
+    ("L", 0.406, -0.3),
+    ("A", 0.593, -0.3935, "ccw"),
+    ("A", 0.406, -0.487, "ccw"),
+    ("L", 0.375, -0.487),
+    ("L", 0.375, -0.75),
+    ("L", 0.75, -0.75),
+    ("L", 0.75, -1.0),
+]
 
 
 class _Num(float):
     """Compares equal within .0001", so a value that sits exactly on a rounding
     boundary (e.g. -.3935 coming out as -.39349999) can't flip the test."""
+
     def __eq__(self, other):
         if not isinstance(other, (int, float)):
             return NotImplemented
@@ -78,13 +89,13 @@ def test_flip_puts_z0_at_the_other_end(parts):
 def test_bushing_gives_od_and_id(parts):
     r = import_step(parts["bush"], flip=True)
     assert (r.od.start.x, r.od.start.z) == (0.56, 0)
-    assert flat(r.od) == [("L", .96, 0), ("L", 1.0, -.02), ("L", 1.0, -1.25)]
-    assert r.id.side == "id" and flat(r.id) == [("L", .5, -.03), ("L", .5, -1.25)]
+    assert flat(r.od) == [("L", 0.96, 0), ("L", 1.0, -0.02), ("L", 1.0, -1.25)]
+    assert r.id.side == "id" and flat(r.id) == [("L", 0.5, -0.03), ("L", 0.5, -1.25)]
 
 
 def test_blind_drilled_hole_and_dome(parts):
     r = import_step(parts["blind"], flip=True)
-    assert flat(r.id)[-1][1:] == (0.0, pytest.approx(-0.5751, abs=1e-3))   # drill point on centre
+    assert flat(r.id)[-1][1:] == (0.0, pytest.approx(-0.5751, abs=1e-3))  # drill point on centre
     r2 = import_step(parts["blind"], flip=False)
     first = r2.od.segments[0]
     assert isinstance(first, Arc) and first.direction == "ccw" and round(first.radius, 4) == 0.5
@@ -116,10 +127,17 @@ def test_imported_profile_posts_clean(parts):
     from omniturn_cam.ops import Finish, Rough
     from omniturn_cam.post import post
     from omniturn_cam.tools import Setup, Station, Tool
+
     r = import_step(parts["manual"], flip=True)
     setup = Setup()
     setup.add(Station(1, Tool("t", "turn", "turn", nose_radius=0.0156), d=1))
-    job = Job("STEP1", "inch", Stock(0.75), setup, {"od": r.od},
-              [Rough(t=1, rpm=2000, profile="od", start_x=0.75, start_z=0.05), Finish(t=1, rpm=2500, profile="od")])
+    job = Job(
+        "STEP1",
+        "inch",
+        Stock(0.75),
+        setup,
+        {"od": r.od},
+        [Rough(t=1, rpm=2000, profile="od", start_x=0.75, start_z=0.05), Finish(t=1, rpm=2500, profile="od")],
+    )
     code = post(job)
     assert "g02x.593z-.3935r.0935" in code and not [p for p in lint(code) if p.severity == "error"]

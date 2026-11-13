@@ -5,6 +5,7 @@ held, nose radius, optional STEP/DXF model). A *setup* says which tool sits at
 which OmniTurn station number (T1-T32) and which secondary offset (D number)
 holds its nose-radius value for this job.
 """
+
 from __future__ import annotations
 
 import tomllib
@@ -14,13 +15,22 @@ from typing import Any, Literal
 
 # What the tool is. Screw-machine tooling is first-class, not an afterthought.
 ToolKind = Literal[
-    "turn", "bore", "face", "groove", "cutoff", "thread",
-    "drill", "center_drill", "spot_drill", "reamer", "tap",
-    "box_tool",          # roller-back / balanced turning box tool
-    "knurl_straddle",    # straddle (cut) knurl
-    "knurl_bump",        # bump / form knurl
-    "die_head",          # releasing die head (geometric / self-opening): no reversal
-    "die_solid",         # solid die holder / acorn die: run like a tap
+    "turn",
+    "bore",
+    "face",
+    "groove",
+    "cutoff",
+    "thread",
+    "drill",
+    "center_drill",
+    "spot_drill",
+    "reamer",
+    "tap",
+    "box_tool",  # roller-back / balanced turning box tool
+    "knurl_straddle",  # straddle (cut) knurl
+    "knurl_bump",  # bump / form knurl
+    "die_head",  # releasing die head (geometric / self-opening): no reversal
+    "die_solid",  # solid die holder / acorn die: run like a tap
     "form",
     "custom",
 ]
@@ -35,8 +45,15 @@ ToolKind = Literal[
 Orientation = Literal["radial", "axial", "perpendicular"]
 
 KIND_DEFAULT_ORIENTATION: dict[str, Orientation] = {
-    "drill": "axial", "center_drill": "axial", "spot_drill": "axial", "reamer": "axial",
-    "tap": "axial", "bore": "axial", "box_tool": "axial", "die_head": "axial", "die_solid": "axial",
+    "drill": "axial",
+    "center_drill": "axial",
+    "spot_drill": "axial",
+    "reamer": "axial",
+    "tap": "axial",
+    "bore": "axial",
+    "box_tool": "axial",
+    "die_head": "axial",
+    "die_solid": "axial",
 }
 
 AXIAL_KINDS = {"drill", "center_drill", "spot_drill", "reamer", "tap"}
@@ -50,10 +67,10 @@ class Tool:
     hand: Literal["left", "right", "neutral"] = "neutral"
     orientation: Orientation | None = None
     nose_radius: float = 0.0
-    diameter: float | None = None      # drills, reamers, taps
-    width: float | None = None         # grooving / cutoff blade width
-    holder: str = ""                   # toolholding system, e.g. "QC 3/4 gang block"
-    model: str | None = None           # path to STEP/DXF of the tool for backplot/collision
+    diameter: float | None = None  # drills, reamers, taps
+    width: float | None = None  # grooving / cutoff blade width
+    holder: str = ""  # toolholding system, e.g. "QC 3/4 gang block"
+    model: str | None = None  # path to STEP/DXF of the tool for backplot/collision
     units: Literal["inch", "metric"] = "inch"
     notes: str = ""
     params: dict[str, Any] = field(default_factory=dict)  # kind-specific: pitch, knurl tpi, etc.
@@ -91,7 +108,7 @@ class ToolLibrary:
         return len(self._tools)
 
     @classmethod
-    def load(cls, path: str | Path) -> "ToolLibrary":
+    def load(cls, path: str | Path) -> ToolLibrary:
         path = Path(path)
         data = tomllib.loads(path.read_text())
         known = set(Tool.__dataclass_fields__)
@@ -117,13 +134,24 @@ class ToolLibrary:
 
     def save(self, path: str | Path) -> None:
         import tomli_w
+
         path = Path(path)
         out = []
         for t in self:
-            d = {"id": t.id, "name": t.name, "kind": t.kind, "hand": t.hand,
-                 "orientation": t.orientation, "nose_radius": t.nose_radius,
-                 "diameter": t.diameter, "width": t.width, "holder": t.holder or None,
-                 "model": t.model, "units": t.units, "notes": t.notes or None}
+            d = {
+                "id": t.id,
+                "name": t.name,
+                "kind": t.kind,
+                "hand": t.hand,
+                "orientation": t.orientation,
+                "nose_radius": t.nose_radius,
+                "diameter": t.diameter,
+                "width": t.width,
+                "holder": t.holder or None,
+                "model": t.model,
+                "units": t.units,
+                "notes": t.notes or None,
+            }
             if t.model:
                 try:
                     d["model"] = str(Path(t.model).resolve().relative_to(path.parent.resolve()))
@@ -139,9 +167,9 @@ class ToolLibrary:
 
 @dataclass
 class Station:
-    t: int                 # OmniTurn tool number 1-32
+    t: int  # OmniTurn tool number 1-32
     tool: Tool
-    d: int | None = None   # secondary offset holding the nose radius for TNR comp
+    d: int | None = None  # secondary offset holding the nose radius for TNR comp
 
     def __post_init__(self):
         if not 1 <= self.t <= 32:

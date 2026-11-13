@@ -4,6 +4,7 @@ Edits go straight into the object's properties and recompute it, so the 3D
 view is the preview. OK keeps the change, Cancel rolls it back (and removes a
 new profile) through the document's undo transaction.
 """
+
 from __future__ import annotations
 
 import FreeCAD as App
@@ -12,7 +13,7 @@ from PySide import QtGui
 
 try:
     from PySide import QtWidgets
-except ImportError:          # older FreeCAD shims put the widgets in QtGui
+except ImportError:  # older FreeCAD shims put the widgets in QtGui
     QtWidgets = QtGui
 
 from .feature import MM_PER_INCH, _solids
@@ -69,8 +70,10 @@ class ProfileTaskPanel:
         self.text.setFont(font)
         self.text.setMinimumHeight(220)
         lay.addWidget(self.text)
-        hint = QtWidgets.QLabel("Orange = OD, blue = ID, drawn on the part where it was cut. "
-                                "Use Save to job file to send it to omniturn-cam.")
+        hint = QtWidgets.QLabel(
+            "Orange = OD, blue = ID, drawn on the part where it was cut. "
+            "Use Save to job file to send it to omniturn-cam."
+        )
         hint.setWordWrap(True)
         lay.addWidget(hint)
         return w
@@ -104,7 +107,7 @@ class ProfileTaskPanel:
 
     def _set_stock_units(self):
         self.stock.blockSignals(True)
-        self.stock.setSuffix(' in' if self.units.currentText() == "inch" else " mm")
+        self.stock.setSuffix(" in" if self.units.currentText() == "inch" else " mm")
         self.stock.setValue(self.obj.StockDiameter.Value / self._k())
         self.stock.blockSignals(False)
 
@@ -129,8 +132,9 @@ class ProfileTaskPanel:
         k = MM_PER_INCH if u == "inch" else 1.0
         unit = '"' if u == "inch" else " mm"
         if o.OD:
-            self.summary.setText(f"{o.MaxDiameter.Value / k:.4f}{unit} max dia x "
-                                 f"{o.PartLength.Value / k:.4f}{unit} long")
+            self.summary.setText(
+                f"{o.MaxDiameter.Value / k:.4f}{unit} max dia x {o.PartLength.Value / k:.4f}{unit} long"
+            )
         else:
             self.summary.setText("No profile")
         self.warnings.setText("\n".join("• " + w for w in o.Warnings))

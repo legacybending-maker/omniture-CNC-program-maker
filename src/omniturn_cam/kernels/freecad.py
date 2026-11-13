@@ -3,6 +3,7 @@
 Works on Part.Shape objects, so the workbench can hand it a solid that is
 already in the document without going through a STEP file.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,8 +22,7 @@ def solids_of(shape) -> list[SolidInfo]:
     out = []
     for s in shape.Solids:
         bb = s.BoundBox
-        out.append(SolidInfo(len(out), f"Solid {len(out) + 1}", abs(s.Volume),
-                             (bb.XLength, bb.YLength, bb.ZLength), s))
+        out.append(SolidInfo(len(out), f"Solid {len(out) + 1}", abs(s.Volume), (bb.XLength, bb.YLength, bb.ZLength), s))
     return out
 
 
@@ -31,6 +31,7 @@ class FreeCADKernel:
 
     def read_solids(self, path) -> list[SolidInfo]:
         from ..stepimport import StepImportError
+
         shape = Part.Shape()
         try:
             shape.read(str(path))
@@ -60,6 +61,7 @@ class FreeCADKernel:
 
     def section(self, solid, origin, normal) -> list[EdgeInfo]:
         from ..stepimport import StepImportError
+
         # A plane face comfortably bigger than the part, centred on the origin.
         n = FreeCAD.Vector(*normal)
         size = 4 * solid.BoundBox.DiagonalLength + 1.0
@@ -77,7 +79,7 @@ class FreeCADKernel:
             if isinstance(c, (Part.Line, Part.LineSegment)):
                 info.kind = "line"
             elif isinstance(c, Part.Circle):
-                ctr = c.Location if hasattr(c, "Location") else c.Center   # Center deprecated in 26.3
+                ctr = c.Location if hasattr(c, "Location") else c.Center  # Center deprecated in 26.3
                 info.kind, info.center, info.radius = "circle", _v(ctr), c.Radius
             out.append(info)
         return out

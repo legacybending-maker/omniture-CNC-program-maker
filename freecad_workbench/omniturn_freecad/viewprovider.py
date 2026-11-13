@@ -1,4 +1,5 @@
 """View provider for the turned profile: colours, icon, double-click to edit."""
+
 from __future__ import annotations
 
 import FreeCADGui as Gui
@@ -28,6 +29,7 @@ class ViewProviderProfile:
         if mode != 0:
             return None
         from .taskpanel import ProfileTaskPanel
+
         new = getattr(self, "new", False)
         self.new = False
         Gui.Control.showDialog(ProfileTaskPanel(vobj.Object, new=new))

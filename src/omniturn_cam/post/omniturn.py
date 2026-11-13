@@ -4,15 +4,30 @@ Every formatting rule here traces back to the OmniTurn operator manual; see
 docs/omniturn-post-rules.md for the list with page references. The output is
 checked by omniturn_cam.lint before it is returned.
 """
+
 from __future__ import annotations
 
 import math
 import re
 from dataclasses import dataclass, field
 
-from ..geometry import Arc, Line, Point, Profile
+from ..geometry import Arc, Point, Profile
 from ..job import Job
-from ..ops import AxialPass, BoxRough, Cutoff, Drill, Face, Finish, Operation, RadialPass, Rough, Tap, Thread, CallSub, RawCode
+from ..ops import (
+    AxialPass,
+    BoxRough,
+    CallSub,
+    Cutoff,
+    Drill,
+    Face,
+    Finish,
+    Operation,
+    RadialPass,
+    RawCode,
+    Rough,
+    Tap,
+    Thread,
+)
 from ..tools import Station
 
 
@@ -23,17 +38,17 @@ class MachineConfig:
     # machine with ~/.config/omniturn-cam/machine.toml.
     name: str = "Hardinge HLV-H OmniTurn G4"
     units: str = "inch"
-    rapid_feed: float = 300.0          # G94 F at 'rapid' (300 IPM is the machine max)
-    tool_call_z: float = 1.0           # safe Z for tool calls and between tools
-    z_clear: float = 0.05              # approach clearance in front of features
-    x_clear: float = 0.05              # radial clearance over stock (added on diameter x2)
-    max_rpm: float = 4000.0            # HLV-H on the OmniTurn VFD
-    x_travel: float | None = 10.0      # slide travel, inch (radial). VERIFY on the machine
-    z_travel: float | None = 9.0       # slide travel, inch. VERIFY on the machine
-    max_bar: float | None = 1.0625     # 5C round collet capacity (inch); None = no check
-    decimals: int = 4                  # .0001 on diameter in G72 (manual p2.6)
+    rapid_feed: float = 300.0  # G94 F at 'rapid' (300 IPM is the machine max)
+    tool_call_z: float = 1.0  # safe Z for tool calls and between tools
+    z_clear: float = 0.05  # approach clearance in front of features
+    x_clear: float = 0.05  # radial clearance over stock (added on diameter x2)
+    max_rpm: float = 4000.0  # HLV-H on the OmniTurn VFD
+    x_travel: float | None = 10.0  # slide travel, inch (radial). VERIFY on the machine
+    z_travel: float | None = 9.0  # slide travel, inch. VERIFY on the machine
+    max_bar: float | None = 1.0625  # 5C round collet capacity (inch); None = no check
+    decimals: int = 4  # .0001 on diameter in G72 (manual p2.6)
     feed_decimals: int = 5
-    arc_format: str = "r"              # "r" or "ik"
+    arc_format: str = "r"  # "r" or "ik"
     # Arc direction as seen on the print (Z+ right, X+ up) -> OmniTurn code.
     # Derived from the manual's I/K examples on p2.18-2.19, where a convex
     # face-to-OD corner (print-CCW) is G02. The OmniTurn's X+ points down.
@@ -47,11 +62,20 @@ class MachineConfig:
     first_sub: int = 1
 
     @classmethod
-    def for_units(cls, units: str, overrides: dict | None = None) -> "MachineConfig":
+    def for_units(cls, units: str, overrides: dict | None = None) -> MachineConfig:
         if units == "metric":
-            m = cls(units="metric", rapid_feed=7620.0, tool_call_z=25.0, z_clear=1.0,
-                    x_clear=1.0, decimals=3, feed_decimals=3, max_bar=27.0,
-                    x_travel=254.0, z_travel=228.6)
+            m = cls(
+                units="metric",
+                rapid_feed=7620.0,
+                tool_call_z=25.0,
+                z_clear=1.0,
+                x_clear=1.0,
+                decimals=3,
+                feed_decimals=3,
+                max_bar=27.0,
+                x_travel=254.0,
+                z_travel=228.6,
+            )
         else:
             m = cls()
         for k, v in (overrides or {}).items():
@@ -61,11 +85,12 @@ class MachineConfig:
         return m
 
     @classmethod
-    def load(cls, path, units: str) -> "MachineConfig":
+    def load(cls, path, units: str) -> MachineConfig:
         """Read a machine.toml: top-level keys apply to both units, [inch]/[metric] tables
         override for one unit system."""
         import tomllib
         from pathlib import Path
+
         data = tomllib.loads(Path(path).read_text())
         common = {k: v for k, v in data.items() if not isinstance(v, dict)}
         return cls.for_units(units, common | data.get(units, {}))
@@ -101,14 +126,14 @@ class OmniTurnPost:
         self.lines: list[str] = []
         self.x: float | None = None
         self.z: float | None = None
-        self.motion: str | None = None      # "rapid" | "feed" | None (unknown)
+        self.motion: str | None = None  # "rapid" | "feed" | None (unknown)
         self.feed_mode = "g94"
         self.feed: float | None = None
         self.tool: int | None = None
         self.rpm: float | None = None
         self.spindle: str | None = None
         self.coolant = False
-        self.subs: dict[str, int] = {}       # profile name -> subroutine number
+        self.subs: dict[str, int] = {}  # profile name -> subroutine number
         self.warnings: list[str] = []
         self.external_text, self.external_nums = job.external_subs()
 
@@ -124,19 +149,25 @@ class OmniTurnPost:
         catches gross problems: where the travel sits relative to the part depends on
         the tool offsets, which the post doesn't know."""
         from ..backplot import interpret
-        pts = [q for path in interpret(code, self.m.arc_codes) for q in path.points()
-               if q[0] is not None and q[1] is not None]
+
+        pts = [
+            q
+            for path in interpret(code, self.m.arc_codes)
+            for q in path.points()
+            if q[0] is not None and q[1] is not None
+        ]
         if not pts:
             return
         zs = [q[0] for q in pts]
         xs = [q[1] for q in pts]
         z_span = max(zs) - min(zs)
-        x_span = (max(xs) - min(xs)) / 2          # diameter -> slide travel
+        x_span = (max(xs) - min(xs)) / 2  # diameter -> slide travel
         if self.m.z_travel and z_span > self.m.z_travel:
             self.warn(f"program moves {z_span:.3f} in Z but the {self.m.name} has {self.m.z_travel:g} of Z travel")
         if self.m.x_travel and x_span > self.m.x_travel:
-            self.warn(f"program moves {x_span:.3f} in X (radial) but the {self.m.name} has "
-                      f"{self.m.x_travel:g} of X travel")
+            self.warn(
+                f"program moves {x_span:.3f} in X (radial) but the {self.m.name} has {self.m.x_travel:g} of X travel"
+            )
 
     def next_sub(self) -> int:
         taken = set(self.subs.values()) | set(self.external_nums)
@@ -250,8 +281,10 @@ class OmniTurnPost:
     def est_rpm(self, op: Operation, dia: float) -> float:
         if op.rpm:
             if op.rpm > self.m.max_rpm:
-                self.warn(f"T{op.t} {op.label}: {op.rpm:g} rpm is over the {self.m.max_rpm:g} rpm "
-                          f"limit set for the {self.m.name}")
+                self.warn(
+                    f"T{op.t} {op.label}: {op.rpm:g} rpm is over the {self.m.max_rpm:g} rpm "
+                    f"limit set for the {self.m.name}"
+                )
             return op.rpm
         if op.sfm:
             k = 1000.0 if self.job.units == "metric" else 12.0
@@ -347,11 +380,15 @@ class OmniTurnPost:
     @staticmethod
     def _check_quadrant(sx, sz, prof: Profile) -> None:
         """G75/G78: contour start A and end B must be in the same quadrant of S (p2.42)."""
+
         def q(p: Point):
-            return (math.copysign(1, p.x - sx) if abs(p.x - sx) > 1e-9 else 0,
-                    math.copysign(1, p.z - sz) if abs(p.z - sz) > 1e-9 else 0)
+            return (
+                math.copysign(1, p.x - sx) if abs(p.x - sx) > 1e-9 else 0,
+                math.copysign(1, p.z - sz) if abs(p.z - sz) > 1e-9 else 0,
+            )
+
         qa, qb = q(prof.start), q(prof.end)
-        for a, b in zip(qa, qb):
+        for a, b in zip(qa, qb, strict=True):
             if a and b and a != b:
                 raise PostError(
                     f"profile {prof.name!r}: start x{prof.start.x} z{prof.start.z} and end "
@@ -365,8 +402,10 @@ class OmniTurnPost:
         self._check_quadrant(sx, sz, prof)
         uz = prof.undercut_z()
         if uz is not None:
-            self.warn(f"T{op.t} {op.cycle.upper()}: shape {prof.name!r} turns back toward the face at Z{uz:g}; "
-                      "a roughing cycle working from the face can't cut that - check it on F4 Verify")
+            self.warn(
+                f"T{op.t} {op.cycle.upper()}: shape {prof.name!r} turns back toward the face at Z{uz:g}; "
+                "a roughing cycle working from the face can't cut that - check it on F4 Verify"
+            )
         self.call_tool(op, sx, self.job.stock.diameter)
         self.rapid(x=sx)
         self.rapid(z=sz)
@@ -395,8 +434,9 @@ class OmniTurnPost:
             else:
                 comp = "g42" if toward_chuck else "g41"
         if comp != "none" and st.d is None:
-            raise PostError(f"t{op.t} finish with {comp}: give this station a d number "
-                            "(secondary offset holding the nose radius)")
+            raise PostError(
+                f"t{op.t} finish with {comp}: give this station a d number (secondary offset holding the nose radius)"
+            )
         self.call_tool(op, sx, self.job.stock.diameter)
         self.rapid(x=sx)
         self.rapid(z=sz)
@@ -428,8 +468,10 @@ class OmniTurnPost:
         if op.peck:
             r = op.retract_z if op.retract_z is not None else sz
             l = op.peck_rapid or self.m.rapid_feed
-            self.emit(f"g83z{self.n(op.z)}k{self.n(op.peck)}f{self.f(op.feed)}"
-                      f"r{self.n(r)}c{self.n(op.peck_clearance)}l{fmt(l, 1)}")
+            self.emit(
+                f"g83z{self.n(op.z)}k{self.n(op.peck)}f{self.f(op.feed)}"
+                f"r{self.n(r)}c{self.n(op.peck_clearance)}l{fmt(l, 1)}"
+            )
         else:
             self.emit(f"g81z{self.n(op.z)}f{self.f(op.feed)}")
         self.feed = op.feed
@@ -453,7 +495,7 @@ class OmniTurnPost:
             self.rapid(z=self.m.tool_call_z)
             if op.stop_spindle_for_stop:
                 self.emit("m05")
-                self.spindle = None   # next cut restarts it
+                self.spindle = None  # next cut restarts it
             self.emit(op.stop_after)
 
     def op_tap(self, op: Tap) -> None:
@@ -470,7 +512,7 @@ class OmniTurnPost:
 
     def thread_plan(self, op: Thread) -> dict:
         """Numbers the G33 cycle will use, for the post, the GUI and warnings."""
-        depth = abs(op.major - op.minor)                     # diameter terms
+        depth = abs(op.major - op.minor)  # diameter terms
         if op.side == "od":
             final_x, start_x = op.minor, op.major - op.first_depth
         else:
@@ -478,8 +520,14 @@ class OmniTurnPost:
         if op.start_x is not None:
             start_x = op.start_x
         passes = (depth / op.first_depth) ** 2 if op.first_depth > 0 else float("inf")
-        return {"depth": depth, "final_x": final_x, "start_x": start_x, "passes": passes,
-                "k": op.lead * op.starts, "pitch": op.lead}
+        return {
+            "depth": depth,
+            "final_x": final_x,
+            "start_x": start_x,
+            "passes": passes,
+            "k": op.lead * op.starts,
+            "pitch": op.lead,
+        }
 
     def op_thread(self, op: Thread) -> None:
         inch = self.job.units == "inch"
@@ -493,20 +541,31 @@ class OmniTurnPost:
         k = plan["k"]
         feed_limit = self.m.rapid_feed
         if op.rpm * k > feed_limit + 1e-9:
-            raise PostError(f"T{op.t} thread: {op.rpm:g} rpm x {k:g} lead = {op.rpm * k:g} "
-                            f"{'ipm' if inch else 'mm/min'}, over the {feed_limit:g} limit. "
-                            f"Slow the spindle to {int(feed_limit / k)} rpm or less (p2.23)")
+            raise PostError(
+                f"T{op.t} thread: {op.rpm:g} rpm x {k:g} lead = {op.rpm * k:g} "
+                f"{'ipm' if inch else 'mm/min'}, over the {feed_limit:g} limit. "
+                f"Slow the spindle to {int(feed_limit / k)} rpm or less (p2.23)"
+            )
         min_runup = 0.1 if inch else 2.5
         if op.runup < min_runup:
-            self.warn(f"T{op.t} thread: run-up {op.runup:g} is short; the manual says start at least "
-                      f"{min_runup:g} away so the slide reaches speed, more for coarse leads or high rpm")
+            self.warn(
+                f"T{op.t} thread: run-up {op.runup:g} is short; the manual says start at least "
+                f"{min_runup:g} away so the slide reaches speed, more for coarse leads or high rpm"
+            )
         if op.taper_a is not None and op.start_x is None:
-            raise PostError(f"T{op.t} thread: give the start X for a tapered thread "
-                            "(the manual corrects the start for the taper over the run-up)")
-        if op.side == "od" and plan["start_x"] <= plan["final_x"] or \
-                op.side == "id" and plan["start_x"] >= plan["final_x"]:
-            raise PostError(f"T{op.t} thread: start X {plan['start_x']:g} is already past the finished "
-                            f"X {plan['final_x']:g}")
+            raise PostError(
+                f"T{op.t} thread: give the start X for a tapered thread "
+                "(the manual corrects the start for the taper over the run-up)"
+            )
+        if (
+            op.side == "od"
+            and plan["start_x"] <= plan["final_x"]
+            or op.side == "id"
+            and plan["start_x"] >= plan["final_x"]
+        ):
+            raise PostError(
+                f"T{op.t} thread: start X {plan['start_x']:g} is already past the finished X {plan['final_x']:g}"
+            )
 
         sx = plan["start_x"]
         clear_x = self.stock_x if op.side == "od" else min(sx, op.minor) - 2 * op.first_depth
@@ -514,7 +573,7 @@ class OmniTurnPost:
         self.call_tool(op, clear_x, self.job.stock.diameter)
         self.comment(f"THREAD ABOUT {max(1, round(plan['passes']))} PASSES")
         if op.lock_overrides:
-            self.emit("m84")   # overrides locked at 100% so rpm can't drift between passes
+            self.emit("m84")  # overrides locked at 100% so rpm can't drift between passes
         words = f"g33x{self.n(plan['final_x'])}z{self.n(op.z_end)}i{self.n(op.first_depth)}k{self.n(k)}"
         if op.taper_a is not None:
             words += f"a{self.n(op.taper_a)}"
@@ -535,7 +594,7 @@ class OmniTurnPost:
             # same rpm, same P/C (p2.26).
             for _ in range(op.spring_passes):
                 self.emit(words + tail + "o")
-            self.x, self.z, self.motion = sx, zs, None   # cycle returns to its start point
+            self.x, self.z, self.motion = sx, zs, None  # cycle returns to its start point
         self.rapid(x=clear_x)
         if op.lock_overrides:
             self.emit("m85")
@@ -597,8 +656,20 @@ class OmniTurnPost:
             self.emit("m05")
             self.spindle = None
 
-    HANDLERS = {CallSub: "op_call_sub", RawCode: "op_raw", Thread: "op_thread", Face: "op_face", BoxRough: "op_box_rough", Tap: "op_tap", Rough: "op_rough", Finish: "op_finish", Drill: "op_drill",
-                AxialPass: "op_axial", Cutoff: "op_radial", RadialPass: "op_radial"}
+    HANDLERS = {
+        CallSub: "op_call_sub",
+        RawCode: "op_raw",
+        Thread: "op_thread",
+        Face: "op_face",
+        BoxRough: "op_box_rough",
+        Tap: "op_tap",
+        Rough: "op_rough",
+        Finish: "op_finish",
+        Drill: "op_drill",
+        AxialPass: "op_axial",
+        Cutoff: "op_radial",
+        RadialPass: "op_radial",
+    }
 
     # ------------------------------------------------------------------ program
     def header(self) -> None:
@@ -613,8 +684,10 @@ class OmniTurnPost:
         self.comment("DIAMETER MODE G72 ABSOLUTE G90")
         self.comment(self.m.name)
         if self.m.max_bar and j.stock.diameter > self.m.max_bar:
-            self.warn(f"bar diameter {j.stock.diameter:g} is over the {self.m.max_bar:g} collet "
-                      f"capacity set for the {self.m.name}")
+            self.warn(
+                f"bar diameter {j.stock.diameter:g} is over the {self.m.max_bar:g} collet "
+                f"capacity set for the {self.m.name}"
+            )
         # Safe start: cancel TNR comp, set units, absolute, diameter, IPM, RPM mode.
         self.emit("g40")
         self.emit("g71" if j.units == "metric" else "g70")
@@ -649,8 +722,7 @@ class OmniTurnPost:
         return "\n".join(self.lines) + "\n"
 
 
-def post(job: Job, machine: MachineConfig | None = None, check: bool = True,
-         warnings: list | None = None) -> str:
+def post(job: Job, machine: MachineConfig | None = None, check: bool = True, warnings: list | None = None) -> str:
     """Generate the program. Pass a list as `warnings` to collect non-fatal notes."""
     try:
         job.validate()
@@ -665,8 +737,8 @@ def post(job: Job, machine: MachineConfig | None = None, check: bool = True,
         warnings.extend(p.warnings)
     if check:
         from ..lint import lint
+
         problems = [p for p in lint(code) if p.severity == "error"]
         if problems:
-            raise PostError("generated code failed the OmniTurn rules check:\n" +
-                            "\n".join(str(p) for p in problems))
+            raise PostError("generated code failed the OmniTurn rules check:\n" + "\n".join(str(p) for p in problems))
     return code

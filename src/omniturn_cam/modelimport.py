@@ -1,5 +1,6 @@
 """One entry point for every 3D model the shape import accepts: STEP (exact CAD
 solids) and STL / 3MF (triangle meshes, e.g. 3D-print files)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,11 +17,13 @@ NOT_SUPPORTED = {
 
 def is_mesh(path) -> bool:
     from .meshimport import MESH_SUFFIXES
+
     return Path(path).suffix.lower() in MESH_SUFFIXES
 
 
 def _check(path):
     from .stepimport import StepImportError
+
     hint = NOT_SUPPORTED.get(Path(path).suffix.lower())
     if hint:
         raise StepImportError(hint)
@@ -31,8 +34,10 @@ def list_bodies(path):
     _check(path)
     if is_mesh(path):
         from .meshimport import read_mesh
+
         return read_mesh(path)
     from .stepimport import read_solids
+
     return read_solids(path)
 
 
@@ -40,6 +45,8 @@ def import_model(path, index=None, units="inch", flip=False):
     _check(path)
     if is_mesh(path):
         from .meshimport import import_mesh
+
         return import_mesh(path, index, units, flip)
     from .stepimport import import_step
+
     return import_step(path, index, units, flip)

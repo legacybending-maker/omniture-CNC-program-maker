@@ -1,4 +1,5 @@
 """Drive the GUI headless the way an operator would and check the job it builds."""
+
 import os
 from pathlib import Path
 
@@ -41,23 +42,23 @@ def test_loads_example_and_generates(win):
 
 
 def test_build_job_from_scratch_and_save(win, tmp_path):
-    win.show_screen(2)                      # tool plate
+    win.show_screen(2)  # tool plate
     plate = win.screens[2]
-    plate._add()                            # T1 = first library tool (LH turn)
+    plate._add()  # T1 = first library tool (LH turn)
     st = win.job.setup.stations[1]
     st.d = 1
-    win.show_screen(1)                      # part shape
+    win.show_screen(1)  # part shape
     shape = win.screens[1]
     shape._add("line")
-    shape.table.item(0, 1).setText("0.5")   # X.5 at Z0
+    shape.table.item(0, 1).setText("0.5")  # X.5 at Z0
     shape._add("line")
     shape.table.item(1, 2).setText("-0.5")  # Z-.5 (X blank = keep .5)
     shape._add("line")
-    shape.table.item(2, 1).setText("1.0")   # up to the bar
+    shape.table.item(2, 1).setText("1.0")  # up to the bar
     prof = win.job.profiles["od"]
     assert [(s.end.x, s.end.z) for s in prof.segments] == [(0.5, 0), (0.5, -0.5), (1.0, -0.5)]
 
-    win.show_screen(3)                      # processes
+    win.show_screen(3)  # processes
     proc = win.screens[3]
     proc._add("rough")
     proc._add("finish")
@@ -79,30 +80,34 @@ def test_errors_are_reported_not_raised(win):
     win.show_screen(3)
     win.job.operations.clear()
     from omniturn_cam.fields import new_operation
-    win.job.operations.append(new_operation("drill", 7))   # no tool at T7
+
+    win.job.operations.append(new_operation("drill", 7))  # no tool at T7
     win.show_screen(4)
     assert "t7" in win.last_error
 
 
 def test_die_head_process_prefills_from_tool(win):
     from omniturn_cam.fields import new_operation
+
     op = new_operation("axial", 3, win.library["die-head-1-2-20"])
     assert op.sync is True and op.feed == 0.05
 
 
 def test_step_import_dialog_fills_shapes(win):
     from omniturn_cam import kernels
+
     try:
-        kernels.get()                # OCP or FreeCAD, whichever is installed
+        kernels.get()  # OCP or FreeCAD, whichever is installed
     except kernels.KernelUnavailable:
         pytest.skip("no geometry kernel")
     from omniturn_cam.gui.stepdialog import StepImportDialog
+
     path = Path(__file__).parent / "data" / "bush.step"
     win.job.stock.diameter = 0.75
     dlg = StepImportDialog(str(path), win.job, win)
     dlg.flip.setChecked(True)
     assert dlg.result is not None and dlg.result.id is not None
-    assert dlg.set_stock.isChecked()          # part is bigger than the bar
+    assert dlg.set_stock.isChecked()  # part is bigger than the bar
     dlg.apply()
     assert win.job.stock.diameter == 1.0
     assert set(win.job.profiles) >= {"od", "id"} and win.job.profiles["id"].side == "id"

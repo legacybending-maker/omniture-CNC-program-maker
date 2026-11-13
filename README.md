@@ -167,10 +167,18 @@ omniturn-cam lint MANG75.cnc       # works on hand-written programs too
 pytest
 ```
 
-Every pull request runs the whole suite on GitHub (`.github/workflows/tests.yml`):
-once as the standalone app (OCP + GUI, Python 3.11 and 3.12) and once inside
-FreeCAD (workbench, and STEP import through FreeCAD's kernel). Changes go to
-`main` through a pull request once both are green.
+## Contributing
+
+Changes go to `main` through a reviewed pull request; `main` is protected. Every
+pull request runs lint, the whole suite as the standalone app (OCP + GUI,
+Python 3.11 and 3.12) and again inside FreeCAD. The complete output of every
+example job is checked line by line against `tests/golden/expected/`, so a
+change to the G-code can't slip through unnoticed.
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): workflow, G-code change rules, review checklist
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the code fits together
+- [docs/RELEASING.md](docs/RELEASING.md): versions and releases
+- [CHANGELOG.md](CHANGELOG.md)
 
 ## Files
 
@@ -184,6 +192,8 @@ FreeCAD (workbench, and STEP import through FreeCAD's kernel). Changes go to
   `python tests/stepparts.py` after changing a part.
 - `docs/omniturn-post-rules.md` – every formatting rule the post follows, with
   manual page references and the items still to verify on a machine.
+- `tests/golden/` – golden jobs, the exact programs they produce, and
+  `verified.toml`, the record of programs proved out on the machine.
 
 ## Things to verify on a real machine
 

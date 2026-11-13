@@ -23,6 +23,14 @@ nose_radius = 0.0156
 holder = "3/4 gang block"
 
 [[tool]]
+id = "bore-bar-250"
+name = "Boring bar 1/4 min bore"
+kind = "bore"
+hand = "left"
+nose_radius = 0.008
+holder = "3/4 gang block"
+
+[[tool]]
 id = "box-bore"
 name = "Box tool"
 kind = "box_tool"
