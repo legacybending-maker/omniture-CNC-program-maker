@@ -363,6 +363,10 @@ class OmniTurnPost:
         prof = self.job.profiles[op.profile]
         sx, sz = self._start_point(op, prof)
         self._check_quadrant(sx, sz, prof)
+        uz = prof.undercut_z()
+        if uz is not None:
+            self.warn(f"T{op.t} {op.cycle.upper()}: shape {prof.name!r} turns back toward the face at Z{uz:g}; "
+                      "a roughing cycle working from the face can't cut that - check it on F4 Verify")
         self.call_tool(op, sx, self.job.stock.diameter)
         self.rapid(x=sx)
         self.rapid(z=sz)

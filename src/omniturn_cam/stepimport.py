@@ -58,7 +58,21 @@ class SolidInfo:
     shape: object = field(repr=False, default=None)
 
 
+_CACHE: dict = {}
+
+
 def read_solids(path: str | Path) -> list[SolidInfo]:
+    """Solids in a STEP file. Cached per file (path, size, mtime): big assemblies
+    take a while to read, and the import window re-imports on every flip."""
+    st = Path(path).stat()
+    key = (str(Path(path).resolve()), st.st_size, st.st_mtime)
+    if key not in _CACHE:
+        _CACHE.clear()
+        _CACHE[key] = _read_solids(path)
+    return _CACHE[key]
+
+
+def _read_solids(path: str | Path) -> list[SolidInfo]:
     _occ()
     from OCP.Bnd import Bnd_Box
     from OCP.BRepBndLib import BRepBndLib
@@ -484,6 +498,11 @@ def import_step(path: str | Path, solid_index: int | None = None, units: str = "
     dec = 6 if units == "inch" else 4
     od = _to_profile(_merge_collinear(od_chain), "od", "od", scale, dec)
     idp = _to_profile(_merge_collinear(id_chain), "id", "id", scale, dec) if id_chain else None
+    for prof in (od, idp):
+        if prof is not None and prof.undercut_z() is not None:
+            warnings.append(f"the {prof.side.upper()} turns back toward the face at Z{prof.undercut_z():g} "
+                            "(a groove or slot cut from the back) - it can't be reached from the face; "
+                            "edit the shape on F2 or machine that feature from the other end")
     rmax = max(p[1] for s in loop for p in s.points())
     return ImportResult(od, idp, round(2 * rmax * scale, dec), round(length * scale, dec), units,
                         warnings, info.name, angle)

@@ -117,6 +117,16 @@ class Profile:
                         f"segment {i + 1} ends at x{seg.end.x} z{seg.end.z}"
                     )
 
+    def undercut_z(self, tol: float = 1e-4) -> float | None:
+        """Z where the shape first turns back toward the face (+Z) after heading toward
+        the chuck - a feature a tool coming from the face can't reach. None if none."""
+        lowest = self.start.z
+        for seg in self.segments:
+            if seg.end.z > lowest + tol:
+                return round(lowest, 4)
+            lowest = min(lowest, seg.end.z)
+        return None
+
     # -- tessellation for plotting / checks ------------------------------------
     def polyline(self, step_deg: float = 5.0) -> list[tuple[float, float]]:
         """Return (z, x_diameter) points with C/R corners and arcs expanded."""

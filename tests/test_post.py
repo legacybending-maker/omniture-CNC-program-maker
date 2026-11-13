@@ -291,3 +291,14 @@ def test_every_operation_round_trips_through_a_saved_job(lib, tmp_path):
     save_job(job, tmp_path / "all.toml")
     again = load_job(tmp_path / "all.toml", lib, validate=False)
     assert [type(o) for o in again.operations] == [type(o) for o in job.operations]
+
+
+def test_rough_warns_on_shape_that_turns_back_toward_face(lib):
+    # cup: OD sleeve, then back up toward the face inside it (slot cut from the back)
+    prof = Profile(Point(0, 0), name="od").line(x=0.65).line(z=-0.84).line(x=0.545).line(z=-0.04) \
+        .line(x=0.415).line(z=-0.915).line(x=0.75)
+    assert prof.undercut_z() == -0.84
+    warns = []
+    post(make_job(lib, {"od": prof}, [Rough(t=1, rpm=2000, profile="od", start_x=0.75, start_z=0.05)]),
+         warnings=warns)
+    assert any("turns back" in w for w in warns)
