@@ -43,6 +43,8 @@ converts them to the OmniTurn's G02/G03, whose X axis points down.
 
 ## Install (Linux)
 
+Step-by-step shop instructions: [SHOP-INSTALL.md](SHOP-INSTALL.md).
+
 ```bash
 git clone https://github.com/legacybending-maker/omniture-CNC-program-maker
 cd omniture-CNC-program-maker
