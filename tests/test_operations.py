@@ -16,8 +16,9 @@ from omniturn_cam.fields import FIELDS, info
 from omniturn_cam.operations import OPERATION_TYPES, SPECS
 
 # The add-process menu, in order. Operators find entries by position, so the
-# order is part of the interface: reordering it is a deliberate change made
-# here, not a side effect of adding a file. New entries may be appended.
+# order is part of the interface: every entry is listed here on purpose, and a
+# new operation is appended here in the same PR. Two PRs that both append get a
+# conflict on this list when the second rebases, and someone decides the order.
 MENU_ORDER = [
     "face",
     "box_rough",
@@ -39,10 +40,21 @@ JOB_FILE_TYPES = set(MENU_ORDER)
 
 
 def test_menu_order_is_stable():
-    assert list(SPECS)[: len(MENU_ORDER)] == MENU_ORDER, (
-        "the add-process menu order changed; operators know it by position. If this is "
-        "intended, update MENU_ORDER here and say so in the PR"
+    assert list(SPECS) == MENU_ORDER, (
+        "the add-process menu differs from MENU_ORDER; operators know it by position. A new "
+        "operation goes at the end of MENU_ORDER (and gets the next free `order`); moving an "
+        "existing one is a deliberate change: update MENU_ORDER and say so in the PR"
     )
+
+
+def test_menu_positions_are_unique():
+    """Two operations with the same `order` would be put in menu order by name,
+    silently. Typical cause: two PRs each took the next free number."""
+    by_order: dict[int, list[str]] = {}
+    for kind, s in SPECS.items():
+        by_order.setdefault(s.order, []).append(kind)
+    clashes = {o: kinds for o, kinds in by_order.items() if len(kinds) > 1}
+    assert not clashes, f"these operations share a menu position (OpSpec.order): {clashes}"
 
 
 def test_job_file_type_names_never_disappear():

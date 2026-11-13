@@ -89,8 +89,8 @@ This is the part that matters most.
 The operator is a machinist at the machine, not a programmer.
 
 - Fill-in-the-blank, Okuma IGF style: every field has a plain-language label,
-  units, and help text (`fields.py`, or the operation's own module). Blank means "automatic" and says what
-  automatic will do.
+  units, and help text (`fields.py`, or the operation's own module). Blank
+  means "automatic" and says what automatic will do.
 - Error messages say what is wrong, where (operation number, tool), what to do
   about it, and the manual page when it's a control rule.
 - Never change a value the operator typed without telling them.

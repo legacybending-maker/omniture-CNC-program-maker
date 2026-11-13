@@ -49,7 +49,7 @@ class OpSpec:
     kind: str  # the job file's `type` value; never rename (old job files use it)
     cls: type[Operation]  # the dataclass the operator fills in
     menu: tuple[str, str]  # (name, one-line description) in the GUI's add-process menu
-    order: int  # position in that menu (ties sort by kind)
+    order: int  # position in that menu; unique (tests/test_operations.py)
     emit: Callable[[OmniTurnPost, Operation], None]  # writes the OmniTurn code
     tool_kinds: tuple[str, ...] = ()  # tool kinds that suit it; the first loaded one is picked
     fields: Mapping[str, FieldInfo] = field(default_factory=dict)  # this op's labels, over fields.FIELDS

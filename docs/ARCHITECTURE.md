@@ -104,18 +104,24 @@ These hold for every program the post writes. Each has a test.
    `<kind>.py`. Give it a new dataclass, `FIELDS` for any field the shared
    table in `fields.py` doesn't label (or labels wrongly for this operation),
    an `emit(p, op)` that writes the code with the `OmniTurnPost` helpers, and
-   `SPEC = OpSpec(...)` with a unique `kind` and the next free `order`.
-   Nothing else needs editing: the package finds the file.
+   `SPEC = OpSpec(...)` with a unique `kind` and the next free `order`
+   (higher than every existing one, so the new entry lands at the end of the
+   menu). Nothing else in `src/` needs editing: the package finds the file.
 2. Write the rule it relies on, with the manual page, in
    `docs/omniturn-post-rules.md`.
 3. Use it in a golden job (`tests/golden/jobs/`), regenerate the expected
    output, and read every line of it. Add focused tests in
    `tests/test_post.py` for its edge cases and errors.
-4. Append it to `MENU_ORDER` in `tests/test_operations.py` (new entries go at
-   the end, so the menu operators know doesn't shift).
+4. Append its `kind` to `MENU_ORDER` in `tests/test_operations.py`. The test
+   pins the whole menu, so it fails until you do; that's deliberate, because
+   operators find menu entries by position.
 
 `tests/test_operations.py` fails if the new module is incomplete: a field with
-no operator label or help, no menu text, no tool kinds, no docstring.
+no operator label or help, no menu text, no tool kinds, no docstring, a menu
+position (`order`) shared with another operation, or a menu that doesn't match
+`MENU_ORDER`. If another PR added an operation first, your rebase conflicts on
+`MENU_ORDER` and your `order` may clash: take the next free number again and
+put your entry after theirs.
 `tests/test_golden.py` fails until a golden job uses it.
 
 Never rename a `kind` or remove a module: saved job files refer to them by
