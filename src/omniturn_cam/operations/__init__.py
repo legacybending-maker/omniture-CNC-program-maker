@@ -14,16 +14,26 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+from collections.abc import Iterable
+from types import ModuleType
 
 from .base import FieldInfo, Operation, OpSpec
 
 
 def _discover() -> dict[str, OpSpec]:
+    modules = [
+        importlib.import_module(f"{__name__}.{m.name}")
+        for m in pkgutil.iter_modules(__path__)
+        if m.name != "base" and not m.name.startswith("_")
+    ]
+    return _register(modules)
+
+
+def _register(modules: Iterable[ModuleType]) -> dict[str, OpSpec]:
+    """Collect each module's SPEC, in menu order. Refuses (at import, so the
+    program won't start) anything that would make operations ambiguous."""
     specs: list[OpSpec] = []
-    for m in pkgutil.iter_modules(__path__):
-        if m.name == "base" or m.name.startswith("_"):
-            continue
-        mod = importlib.import_module(f"{__name__}.{m.name}")
+    for mod in modules:
         spec = getattr(mod, "SPEC", None)
         if not isinstance(spec, OpSpec):
             raise ImportError(f"{mod.__name__} defines no SPEC = OpSpec(...)")
