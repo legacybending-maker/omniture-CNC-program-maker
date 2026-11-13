@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omniturn-cam"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Conversational 2D lathe CAM for OmniTurn gang-tool lathes: profile in, OmniTurn G-code out"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -30,6 +30,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
+
+[tool.setuptools.dynamic]
+version = { attr = "omniturn_cam.__version__" }
 
 [tool.setuptools.package-data]
 omniturn_cam = ["data/*.toml"]

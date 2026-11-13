@@ -18,22 +18,24 @@ The last line must print **Python 3.11** or newer.
 
 ## 2. Put the program in your home folder
 
-**Option A: from the zip you were sent.** Unzip it into your home folder.
-You'll get a folder called `omniturn-cam`.
+Install a **release** (a tested, numbered version), not the latest
+development code. The releases are listed at
+https://github.com/legacybending-maker/omniture-CNC-program-maker/releases
+with what changed in each one.
 
-```bash
-cd ~
-unzip ~/Downloads/omniturn-cam-*.zip
-cd ~/omniturn-cam
-```
-
-**Option B: from GitHub.** This way you can pull updates later with `git pull`.
+**Option A: from GitHub (recommended).** Updates are one command later.
 
 ```bash
 cd ~
 git clone https://github.com/legacybending-maker/omniture-CNC-program-maker omniturn-cam
 cd ~/omniturn-cam
+git checkout "$(git describe --tags --abbrev=0 origin/main)"   # the newest release
+git describe --tags                                            # shows which one you're on
 ```
+
+**Option B: from a release zip.** Download "Source code (zip)" from the
+release page and unzip it into your home folder, renaming the folder to
+`omniturn-cam`.
 
 ## 3. Install
 
@@ -93,13 +95,24 @@ The first time it runs, it creates two files you should look over:
 
 ## Updating
 
-If you installed from GitHub (option B):
+Read the release notes first, especially **G-code output**: they say which
+programs come out different. Then:
 
 ```bash
-cd ~/omniturn-cam && git pull && .venv/bin/pip install -e ".[all]"
+cd ~/omniturn-cam
+git fetch --tags
+git checkout vX.Y.Z                      # the release you want
+.venv/bin/pip install -e ".[all]"
 ```
 
-If you installed from a zip, unzip the new one over the old folder and run
+Before cutting metal with a new version, re-post a job you've run before and
+compare: `diff OLD.cnc NEW.cnc`. Anything different should be explained in the
+release notes; prove it out again (F4 Verify, single block).
+
+To go back to the version you had: `git checkout vOLD` and the `pip install`
+line again.
+
+If you installed from a zip, unzip the new release over the old folder and run
 the `pip install` line again.
 
 ## If something goes wrong

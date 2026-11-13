@@ -1,0 +1,38 @@
+name: Feature or task
+description: A new capability, an improvement, or a piece of work for one session
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What and why
+      description: What should change for the person at the machine?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area (one per issue)
+      options:
+        - Post / G-code
+        - GUI
+        - Model import
+        - FreeCAD workbench
+        - Job / tool / machine files
+        - Tests, CI, docs
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: How we'll know it's finished. Tests, golden jobs, manual pages to check.
+  - type: checkboxes
+    id: gcode
+    attributes:
+      label: G-code
+      options:
+        - label: This is expected to change G-code output
+  - type: textarea
+    id: refs
+    attributes:
+      label: Manual pages / references

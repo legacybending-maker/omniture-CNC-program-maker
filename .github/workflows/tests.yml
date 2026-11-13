@@ -1,11 +1,12 @@
 # Runs the whole test suite on every pull request and on every push to main.
 #
+#   lint     - ruff check + ruff format --check (same pinned ruff as the dev extra)
 #   standard - the standalone app: OCP (cadquery-ocp) for STEP import, PySide6 GUI
 #   freecad  - the same tests inside FreeCAD's Python (conda-forge FreeCAD), which
 #              also runs the FreeCAD workbench tests and the STEP import tests
 #              with FreeCAD's own geometry kernel
 #
-# Both must pass. Each kernel's STEP tests skip in the other job, so between
+# All must pass (branch protection on main requires them). Each kernel's STEP tests skip in the other job, so between
 # them every test runs at least once.
 name: tests
 
@@ -20,6 +21,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff (version pinned in pyproject.toml dev extra)
+        run: pip install "$(python -c "import tomllib; d = tomllib.load(open('pyproject.toml','rb')); print(next(x for x in d['project']['optional-dependencies']['dev'] if x.startswith('ruff')))")"
+      - name: ruff check
+        run: ruff check --output-format github .
+      - name: ruff format
+        run: ruff format --check --diff .
+
   standard:
     name: standard (Python ${{ matrix.python }})
     runs-on: ubuntu-24.04
