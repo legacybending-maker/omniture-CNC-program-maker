@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Literal
 
 from .geometry import Arc, Line, Point, Profile
-from .ops import OPERATION_TYPES, Operation
+from .operations import OPERATION_TYPES, Operation, kind_of
 from .tools import Setup, Station, ToolLibrary
 
 NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,8}")
@@ -169,8 +169,7 @@ def profile_to_dict(prof: Profile) -> dict:
 
 
 def op_to_dict(op: Operation) -> dict:
-    kind = next(k for k, cls in OPERATION_TYPES.items() if type(op) is cls)
-    out = {"type": kind}
+    out = {"type": kind_of(op)}
     # Write every value explicitly so a saved job never changes if defaults do.
     for f in dataclasses.fields(op):
         v = getattr(op, f.name)
