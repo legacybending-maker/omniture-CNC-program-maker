@@ -7,6 +7,7 @@ of the cut. Change the model and recompute, and the profile follows.
 No FreeCADGui imports at module level, so documents with profiles open in
 FreeCADCmd too.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,8 +22,8 @@ from omniturn_cam.job import profile_from_dict, profile_to_dict
 from omniturn_cam.stepimport import ImportResult, StepImportError, extend_to_stock, import_solid
 
 MM_PER_INCH = 25.4
-OD_COLOR = (1.0, 0.45, 0.0)     # orange
-ID_COLOR = (0.1, 0.45, 1.0)     # blue
+OD_COLOR = (1.0, 0.45, 0.0)  # orange
+ID_COLOR = (0.1, 0.45, 1.0)  # blue
 
 
 def _source_shape(obj):
@@ -104,16 +105,26 @@ class ProfileFeature:
                 obj.setEditorMode(name, mode)
 
         add("App::PropertyLink", "Source", "Profile", "Turned solid the profile comes from")
-        add("App::PropertyInteger", "SolidIndex", "Profile",
-            "Which solid of the source, when it has more than one (0 = first)", 0)
+        add(
+            "App::PropertyInteger",
+            "SolidIndex",
+            "Profile",
+            "Which solid of the source, when it has more than one (0 = first)",
+            0,
+        )
         add("App::PropertyEnumeration", "Units", "Profile", "Units the profile is written in")
         if not obj.getEnumerationsOfProperty("Units"):
             obj.Units = ["inch", "metric"]
             obj.Units = "inch"
         add("App::PropertyBool", "Flip", "Profile", "Put Z0 (the face) at the other end of the part", False)
-        add("App::PropertyLength", "StockDiameter", "Profile",
+        add(
+            "App::PropertyLength",
+            "StockDiameter",
+            "Profile",
             "Bar diameter. The OD is run out to it at the back so G75/G78 have a closed area "
-            "to rough. 0 = the part's largest diameter", 0)
+            "to rough. 0 = the part's largest diameter",
+            0,
+        )
         add("App::PropertyBool", "RunOutToStock", "Profile", "Finish the OD at the stock diameter", True)
         ro = 1  # read-only in the property editor
         add("App::PropertyLength", "MaxDiameter", "Result", "Largest diameter of the part", None, ro)
@@ -130,7 +141,7 @@ class ProfileFeature:
     def loads(self, state):
         return None
 
-    __getstate__ = dumps     # FreeCAD < 1.0
+    __getstate__ = dumps  # FreeCAD < 1.0
 
     def __setstate__(self, state):
         return None
@@ -153,11 +164,16 @@ class ProfileFeature:
         obj.OD = _segment_text(result.od, result.units)
         obj.ID = _segment_text(result.id, result.units) if result.id else []
         obj.Warnings = result.warnings
-        obj.ProfileData = json.dumps({
-            "units": result.units, "max_dia": result.max_dia, "length": result.length,
-            "solid": result.solid,
-            "profile": {"od": profile_to_dict(result.od)} | ({"id": profile_to_dict(result.id)} if result.id else {}),
-        })
+        obj.ProfileData = json.dumps(
+            {
+                "units": result.units,
+                "max_dia": result.max_dia,
+                "length": result.length,
+                "solid": result.solid,
+                "profile": {"od": profile_to_dict(result.od)}
+                | ({"id": profile_to_dict(result.id)} if result.id else {}),
+            }
+        )
         od_edges = _profile_edges(result.od, result)
         id_edges = _profile_edges(result.id, result) if result.id else []
         shape = Part.Compound(od_edges + id_edges)
@@ -175,8 +191,7 @@ class ProfileFeature:
         idx = obj.SolidIndex
         if not 0 <= idx < len(solids):
             raise StepImportError(f"{obj.Source.Label} has {len(solids)} solid(s); SolidIndex {idx} is out of range")
-        result = import_solid(solids[idx], obj.Units, obj.Flip, "freecad",
-                              f"{obj.Source.Label} solid {idx + 1}")
+        result = import_solid(solids[idx], obj.Units, obj.Flip, "freecad", f"{obj.Source.Label} solid {idx + 1}")
         if obj.RunOutToStock:
             k = MM_PER_INCH if obj.Units == "inch" else 1.0
             stock = obj.StockDiameter.Value / k or result.max_dia
@@ -220,5 +235,6 @@ def make_profile(source, solid_index: int = 0, doc=None, units: str = "inch"):
     obj.Units = units
     if App.GuiUp:
         from .viewprovider import ViewProviderProfile
+
         ViewProviderProfile(obj.ViewObject)
     return obj

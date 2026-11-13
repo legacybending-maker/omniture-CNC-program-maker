@@ -13,6 +13,7 @@ A profile is a start point followed by segments. Line segments may carry a
 corner chamfer (``c``) or radius (``r``) that blends into the NEXT line, the
 same way the OmniTurn's own ``C``/``R`` words work.
 """
+
 from __future__ import annotations
 
 import math
@@ -36,7 +37,7 @@ class Point:
 class Line:
     end: Point
     chamfer: float | None = None  # corner at `end`, blends into next line
-    radius: float | None = None   # corner at `end`, blends into next line
+    radius: float | None = None  # corner at `end`, blends into next line
 
     def __post_init__(self):
         if self.chamfer and self.radius:
@@ -150,8 +151,10 @@ def _arc_points(z0, r0, z1, r1, cz, cr, direction: ArcDir, step_deg: float):
             a1 -= 2 * math.pi
     n = max(2, int(abs(a1 - a0) / math.radians(step_deg)) + 1)
     rad = math.hypot(z0 - cz, r0 - cr)
-    return [(cz + rad * math.cos(a0 + (a1 - a0) * i / n), cr + rad * math.sin(a0 + (a1 - a0) * i / n))
-            for i in range(1, n + 1)]
+    return [
+        (cz + rad * math.cos(a0 + (a1 - a0) * i / n), cr + rad * math.sin(a0 + (a1 - a0) * i / n))
+        for i in range(1, n + 1)
+    ]
 
 
 def corner_blend(p0, p1, p2, chamfer=None, radius=None, step_deg=5.0):

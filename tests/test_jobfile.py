@@ -1,4 +1,5 @@
 """Job file format: versioning and round trips. Old job files must keep loading."""
+
 from pathlib import Path
 
 import pytest
@@ -31,7 +32,7 @@ def test_file_without_format_is_format_1(lib):
 def test_newer_format_refused_with_clear_message(lib, tmp_path):
     src = (ROOT / "examples" / "manual_g75.toml").read_text()
     newer = tmp_path / "new.toml"
-    newer.write_text(src.replace('[job]\n', f'[job]\nformat = {JOB_FORMAT + 1}\n', 1))
+    newer.write_text(src.replace("[job]\n", f"[job]\nformat = {JOB_FORMAT + 1}\n", 1))
     with pytest.raises(ValueError, match="newer omniturn-cam"):
         load_job(newer, lib)
 

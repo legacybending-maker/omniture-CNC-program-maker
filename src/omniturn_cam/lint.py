@@ -2,23 +2,95 @@
 
 Works on any program, hand-written or generated:  omniturn-cam lint FILE
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 
 ONE_SHOT_G = {"02", "03", "04", "33", "34", "81", "83", "92"}
-KNOWN_M = {f"{n:02d}" for n in [0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 17, 18, 19, 21, 23, 27, 30, 32, 33,
-                                 38, *range(40, 60), 60, 61, 62, 64, 65, 84, 85, 86, 87,
-                                 91, 92, 93, 94, 95, 97, 98, 99]}
-KNOWN_G = {"00", "01", "02", "03", "04", "10", "33", "34", "40", "41", "42", "70", "71", "72",
-           "73", "74", "75", "76", "77", "78", "81", "83", "90", "91", "92", "94", "95", "96", "97"}
+KNOWN_M = {
+    f"{n:02d}"
+    for n in [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        17,
+        18,
+        19,
+        21,
+        23,
+        27,
+        30,
+        32,
+        33,
+        38,
+        *range(40, 60),
+        60,
+        61,
+        62,
+        64,
+        65,
+        84,
+        85,
+        86,
+        87,
+        91,
+        92,
+        93,
+        94,
+        95,
+        97,
+        98,
+        99,
+    ]
+}
+KNOWN_G = {
+    "00",
+    "01",
+    "02",
+    "03",
+    "04",
+    "10",
+    "33",
+    "34",
+    "40",
+    "41",
+    "42",
+    "70",
+    "71",
+    "72",
+    "73",
+    "74",
+    "75",
+    "76",
+    "77",
+    "78",
+    "81",
+    "83",
+    "90",
+    "91",
+    "92",
+    "94",
+    "95",
+    "96",
+    "97",
+}
 
 
 @dataclass
 class Problem:
     line: int
-    severity: str   # "error" | "warning"
+    severity: str  # "error" | "warning"
     message: str
 
     def __str__(self):
@@ -73,8 +145,11 @@ def lint(program: str, filename: str | None = None) -> list[Problem]:
                 add(i, "error", "subroutine start must be '}n' on its own line (p2.55)")
             else:
                 if m.group(1) in defined_subs:
-                    add(i, "error", f"subroutine {m.group(1)} is defined twice - check pasted / included "
-                                    "subroutine files")
+                    add(
+                        i,
+                        "error",
+                        f"subroutine {m.group(1)} is defined twice - check pasted / included subroutine files",
+                    )
                 defined_subs.add(m.group(1))
             in_sub = True
             continue
@@ -88,8 +163,11 @@ def lint(program: str, filename: str | None = None) -> list[Problem]:
 
         if expect_xz_after_tool is not None:
             if not ("x" in code_l and "z" in code_l):
-                add(i, "error", f"the line after the tool call on line {expect_xz_after_tool} "
-                                "must have both X and Z (p2.9)")
+                add(
+                    i,
+                    "error",
+                    f"the line after the tool call on line {expect_xz_after_tool} must have both X and Z (p2.9)",
+                )
             expect_xz_after_tool = None
 
         if "o" in (code_l[:-1] if code_l.startswith("g33") and code_l.endswith("o") else code_l):
@@ -115,7 +193,7 @@ def lint(program: str, filename: str | None = None) -> list[Problem]:
             if len(mc) == 2 and mc not in KNOWN_M:
                 add(i, "warning", f"m{mc} is not in the OmniTurn code list")
         if "m95" in code_l:
-            called_subs.append((i, "1"))   # M95 jumps to subroutine 1 on the loader input
+            called_subs.append((i, "1"))  # M95 jumps to subroutine 1 on the loader input
 
         tm = re.match(r"t(\d+)", code_l)
         if tm:

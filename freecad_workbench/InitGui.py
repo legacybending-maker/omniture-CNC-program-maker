@@ -9,10 +9,12 @@ class OmniTurnCAMWorkbench(Gui.Workbench):
 
     def __init__(self):
         import omniturn_freecad
+
         self.__class__.Icon = omniturn_freecad.icon("workbench.svg")
 
     def Initialize(self):
         from omniturn_freecad import commands
+
         names = commands.register()
         self.appendToolbar("OmniTurn CAM", names)
         self.appendMenu("&OmniTurn", names)

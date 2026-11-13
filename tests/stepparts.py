@@ -1,12 +1,17 @@
 """Make test STEP files with OpenCascade: revolve a (z, r) outline, optionally move
 it off the world axes, cut flats / cross holes, or put several solids in one file."""
+
 from __future__ import annotations
 
 import math
 
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
-from OCP.BRepBuilderAPI import (BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeWire,
-                                BRepBuilderAPI_Transform)
+from OCP.BRepBuilderAPI import (
+    BRepBuilderAPI_MakeEdge,
+    BRepBuilderAPI_MakeFace,
+    BRepBuilderAPI_MakeWire,
+    BRepBuilderAPI_Transform,
+)
 from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakeRevol
 from OCP.BRep import BRep_Builder
 from OCP.GC import GC_MakeArcOfCircle
@@ -17,7 +22,7 @@ from OCP.TopoDS import TopoDS_Compound
 
 
 def P(z, r):
-    return gp_Pnt(r, 0, z)      # outline drawn in the XZ plane, revolved about Z
+    return gp_Pnt(r, 0, z)  # outline drawn in the XZ plane, revolved about Z
 
 
 def revolve(outline):
@@ -76,6 +81,7 @@ def write(path, *shapes):
 
 IN = 25.4
 
+
 # The manual's G75 example part (p2.43), in mm, face at z=0: .343 dia with .125 chamfer,
 # .406 dia to Z-.3, a raised bead R.0935 to Z-.487, .375 dia to Z-.75, .75 dia body to Z-1.
 def manual_part():
@@ -83,35 +89,39 @@ def manual_part():
     z = lambda v: v * IN
     bead_c = (z(-0.3935), r(0.406))
     top = (bead_c[0], bead_c[1] + 0.0935 * IN)
-    return revolve([
-        ("start", (z(0), 0)),
-        ("line", (z(0), r(0.343) - 0.125 * IN)),
-        ("line", (z(-0.125), r(0.343))),
-        ("line", (z(-0.3), r(0.343))),
-        ("line", (z(-0.3), r(0.406))),
-        ("arc", (z(-0.487), r(0.406)), top),
-        ("line", (z(-0.487), r(0.375))),
-        ("line", (z(-0.75), r(0.375))),
-        ("line", (z(-0.75), r(0.75))),
-        ("line", (z(-1.0), r(0.75))),
-        ("line", (z(-1.0), 0)),
-        ("line", (z(0), 0)),
-    ])
+    return revolve(
+        [
+            ("start", (z(0), 0)),
+            ("line", (z(0), r(0.343) - 0.125 * IN)),
+            ("line", (z(-0.125), r(0.343))),
+            ("line", (z(-0.3), r(0.343))),
+            ("line", (z(-0.3), r(0.406))),
+            ("arc", (z(-0.487), r(0.406)), top),
+            ("line", (z(-0.487), r(0.375))),
+            ("line", (z(-0.75), r(0.375))),
+            ("line", (z(-0.75), r(0.75))),
+            ("line", (z(-1.0), r(0.75))),
+            ("line", (z(-1.0), 0)),
+            ("line", (z(0), 0)),
+        ]
+    )
 
 
 # A bushing: 1.0 OD, .5 bore with a .03 chamfer at the mouth, .02 chamfer on the OD at the face, 1.25 long.
 def bushing():
     r = lambda d: d / 2 * IN
     z = lambda v: v * IN
-    return revolve([
-        ("start", (z(0), r(0.56))),
-        ("line", (z(0), r(0.96))),
-        ("line", (z(-0.02), r(1.0))),
-        ("line", (z(-1.25), r(1.0))),
-        ("line", (z(-1.25), r(0.5))),
-        ("line", (z(-0.03), r(0.5))),
-        ("line", (z(0), r(0.56))),
-    ])
+    return revolve(
+        [
+            ("start", (z(0), r(0.56))),
+            ("line", (z(0), r(0.96))),
+            ("line", (z(-0.02), r(1.0))),
+            ("line", (z(-1.25), r(1.0))),
+            ("line", (z(-1.25), r(0.5))),
+            ("line", (z(-0.03), r(0.5))),
+            ("line", (z(0), r(0.56))),
+        ]
+    )
 
 
 # 1.0 dia x 1.5 stud with a .25 drilled blind hole (118 deg point) .5 deep and a domed back end.
@@ -120,22 +130,25 @@ def blind_hole_dome():
     z = lambda v: v * IN
     tip = 0.125 / math.tan(math.radians(59))
     dome_r = 0.5 * IN
-    mid = (z(-1.5) - dome_r * math.sin(math.radians(45)) + dome_r * 0 , 0)
-    return revolve([
-        ("start", (z(0), r(0.25))),
-        ("line", (z(0), r(1.0))),
-        ("line", (z(-1.0), r(1.0))),
-        ("arc", (z(-1.5), 0), (z(-1.0) - dome_r * math.sin(math.radians(45)), dome_r * math.cos(math.radians(45)))),
-        ("line", (z(-0.5 - tip), 0)),
-        ("line", (z(-0.5), r(0.25))),
-        ("line", (z(0), r(0.25))),
-    ])
+    mid = (z(-1.5) - dome_r * math.sin(math.radians(45)) + dome_r * 0, 0)
+    return revolve(
+        [
+            ("start", (z(0), r(0.25))),
+            ("line", (z(0), r(1.0))),
+            ("line", (z(-1.0), r(1.0))),
+            ("arc", (z(-1.5), 0), (z(-1.0) - dome_r * math.sin(math.radians(45)), dome_r * math.cos(math.radians(45)))),
+            ("line", (z(-0.5 - tip), 0)),
+            ("line", (z(-0.5), r(0.25))),
+            ("line", (z(0), r(0.25))),
+        ]
+    )
 
 
 def write_stl(path, shape, ascii=False, deflection=0.002):
     """Tessellate like a CAD STL export (fine) and write it."""
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.StlAPI import StlAPI_Writer
+
     BRepMesh_IncrementalMesh(shape, deflection, False, 0.05, True)
     w = StlAPI_Writer()
     w.ASCIIMode = ascii
@@ -148,17 +161,20 @@ def write_3mf(path, shape, offset=(150.0, 120.0, 0.0), deflection=0.002):
     import zipfile
     import numpy as np
     from omniturn_cam.meshimport import read_stl
+
     tmp = str(path) + ".stl"
     write_stl(tmp, shape, deflection=deflection)
     body = read_stl(tmp)[0]
     v = body.vertices - np.array(offset)
     verts = "".join(f'<vertex x="{x:.6f}" y="{y:.6f}" z="{z:.6f}"/>' for x, y, z in v)
     tris = "".join(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in body.triangles)
-    model = ('<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" '
-             'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources>'
-             f'<object id="1" type="model"><mesh><vertices>{verts}</vertices><triangles>{tris}</triangles>'
-             '</mesh></object></resources><build><item objectid="1" transform="1 0 0 0 1 0 0 0 1 '
-             f'{offset[0]} {offset[1]} {offset[2]}"/></build></model>')
+    model = (
+        '<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" '
+        'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources>'
+        f'<object id="1" type="model"><mesh><vertices>{verts}</vertices><triangles>{tris}</triangles>'
+        '</mesh></object></resources><build><item objectid="1" transform="1 0 0 0 1 0 0 0 1 '
+        f'{offset[0]} {offset[1]} {offset[2]}"/></build></model>'
+    )
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("3D/3dmodel.model", model)
     return path
@@ -168,6 +184,7 @@ def make_fixtures(d):
     """Write the STEP files the import tests use (tests/data). Re-run after
     changing a part:  python tests/stepparts.py"""
     from pathlib import Path
+
     d = Path(d)
     d.mkdir(parents=True, exist_ok=True)
     feat = cut(cut(manual_part(), cross_hole(-0.6 * IN, 0.125 * IN)), flat(0.15 * IN, -0.74 * IN, -0.5 * IN))
@@ -183,5 +200,6 @@ def make_fixtures(d):
 
 if __name__ == "__main__":
     import pathlib
+
     for name, path in make_fixtures(pathlib.Path(__file__).parent / "data").items():
         print(name, path)

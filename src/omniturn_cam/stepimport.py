@@ -20,6 +20,7 @@ both.
 Everything here works in the part's own (z, r) plane: z along the axis, r the
 distance from it. Profiles come out with diameters, like the rest of the app.
 """
+
 from __future__ import annotations
 
 import math
@@ -30,12 +31,22 @@ from . import kernels
 from .geometry import Arc, Line, Point, Profile
 from .kernels import Kernel, SolidInfo
 
-__all__ = ["StepImportError", "SolidInfo", "Axis", "ImportResult", "read_solids", "find_axis",
-           "import_step", "import_solid", "finish_loop", "extend_to_stock"]
+__all__ = [
+    "StepImportError",
+    "SolidInfo",
+    "Axis",
+    "ImportResult",
+    "read_solids",
+    "find_axis",
+    "import_step",
+    "import_solid",
+    "finish_loop",
+    "extend_to_stock",
+]
 
 MM_PER_INCH = 25.4
-TOL = 1e-4          # mm, for joining edge ends
-ANGLES = [7 + 30 * i for i in range(12)]   # cut angles, degrees; avoids the usual seam at 0
+TOL = 1e-4  # mm, for joining edge ends
+ANGLES = [7 + 30 * i for i in range(12)]  # cut angles, degrees; avoids the usual seam at 0
 
 
 class StepImportError(ValueError):
@@ -120,7 +131,8 @@ def _axis_and_faces(solid, kernel: Kernel) -> tuple[Axis, list[str], float]:
     if free > 0.5 * total:
         raise StepImportError(
             f"{free / total:.0%} of this solid's surface is free-form (springs, castings, moulded "
-            "parts) - it isn't a turned part")
+            "parts) - it isn't a turned part"
+        )
     clusters: list[Axis] = []
     for f in faces:
         if f.axis is None:
@@ -162,13 +174,14 @@ def _axis_and_faces(solid, kernel: Kernel) -> tuple[Axis, list[str], float]:
 @dataclass
 class Seg:
     """A section edge in the part plane: z along the axis, r from it (mm)."""
+
     p0: tuple
     p1: tuple
-    kind: str = "line"          # "line" | "arc"
+    kind: str = "line"  # "line" | "arc"
     center: tuple | None = None
     radius: float = 0.0
-    direction: str = ""         # arc: "ccw" / "cw" travelling p0 -> p1 (z right, r up)
-    approx: bool = False        # a piece of a curve that wasn't a line or an arc
+    direction: str = ""  # arc: "ccw" / "cw" travelling p0 -> p1 (z right, r up)
+    approx: bool = False  # a piece of a curve that wasn't a line or an arc
 
     def reversed(self) -> "Seg":
         d = {"ccw": "cw", "cw": "ccw"}.get(self.direction, "")
@@ -192,8 +205,13 @@ class Seg:
         else:
             while a1 >= a0:
                 a1 -= 2 * math.pi
-        return [(self.center[0] + self.radius * math.cos(a0 + (a1 - a0) * i / n),
-                 self.center[1] + self.radius * math.sin(a0 + (a1 - a0) * i / n)) for i in range(n + 1)]
+        return [
+            (
+                self.center[0] + self.radius * math.cos(a0 + (a1 - a0) * i / n),
+                self.center[1] + self.radius * math.sin(a0 + (a1 - a0) * i / n),
+            )
+            for i in range(n + 1)
+        ]
 
 
 def _frame(axis: Axis, angle_deg: float) -> tuple[tuple, tuple]:
@@ -296,6 +314,7 @@ def _fit(pts, tol=2e-3) -> list[Seg] | None:
 
 def _chains(segs: list[Seg]) -> list[list[Seg]]:
     """Join segments end to end into chains (closed loops or open axis-to-axis chains)."""
+
     def key(p):
         return (round(p[0] / TOL), round(p[1] / TOL))
 
@@ -311,23 +330,30 @@ def _chains(segs: list[Seg]) -> list[list[Seg]]:
             grown = False
             for i, s in enumerate(unused):
                 if near(chain[-1].p1, s.p0):
-                    chain.append(unused.pop(i)); grown = True; break
+                    chain.append(unused.pop(i))
+                    grown = True
+                    break
                 if near(chain[-1].p1, s.p1):
-                    chain.append(unused.pop(i).reversed()); grown = True; break
+                    chain.append(unused.pop(i).reversed())
+                    grown = True
+                    break
                 if near(chain[0].p0, s.p1):
-                    chain.insert(0, unused.pop(i)); grown = True; break
+                    chain.insert(0, unused.pop(i))
+                    grown = True
+                    break
                 if near(chain[0].p0, s.p0):
-                    chain.insert(0, unused.pop(i).reversed()); grown = True; break
+                    chain.insert(0, unused.pop(i).reversed())
+                    grown = True
+                    break
         chains.append(chain)
     return chains
 
 
 def _area(chain: list[Seg]) -> float:
     pts = [p for s in chain for p in s.points()]
-    if math.dist(pts[0], pts[-1]) > TOL * 5:      # open chain: closed by the axis
+    if math.dist(pts[0], pts[-1]) > TOL * 5:  # open chain: closed by the axis
         pts = pts + [(pts[-1][0], 0.0), (pts[0][0], 0.0)]
-    return abs(sum(pts[i][0] * pts[i + 1][1] - pts[i + 1][0] * pts[i][1]
-                   for i in range(-1, len(pts) - 1))) / 2
+    return abs(sum(pts[i][0] * pts[i + 1][1] - pts[i + 1][0] * pts[i][1] for i in range(-1, len(pts) - 1))) / 2
 
 
 def _merge_collinear(chain: list[Seg]) -> list[Seg]:
@@ -357,8 +383,8 @@ class ImportResult:
     angle: float
     # where the profile sits in the model, so a CAD front end can draw it on the part
     axis: Axis | None = None
-    radial: tuple = (1.0, 0.0, 0.0)   # in-plane direction of r+ for the chosen cut
-    z_face: float = 0.0               # axial position of Z0 (mm, before the flip)
+    radial: tuple = (1.0, 0.0, 0.0)  # in-plane direction of r+ for the chosen cut
+    z_face: float = 0.0  # axial position of Z0 (mm, before the flip)
     flip: bool = False
 
     def to_model(self, x: float, z: float) -> tuple:
@@ -385,8 +411,13 @@ def _to_profile(chain: list[Seg], name: str, side: str, scale: float, decimals: 
     return prof
 
 
-def import_step(path: str | Path, solid_index: int | None = None, units: str = "inch",
-                flip: bool = False, kernel: Kernel | str | None = None) -> ImportResult:
+def import_step(
+    path: str | Path,
+    solid_index: int | None = None,
+    units: str = "inch",
+    flip: bool = False,
+    kernel: Kernel | str | None = None,
+) -> ImportResult:
     """Read a STEP file and return OD/ID profiles with Z0 at the face end.
 
     flip=False puts Z0 at the end the turning axis points to; flip=True uses the
@@ -401,19 +432,22 @@ def import_step(path: str | Path, solid_index: int | None = None, units: str = "
     return import_solid(info.shape, units, flip, kernel, info.name)
 
 
-def import_solid(solid, units: str = "inch", flip: bool = False,
-                 kernel: Kernel | str | None = None, name: str = "Solid") -> ImportResult:
+def import_solid(
+    solid, units: str = "inch", flip: bool = False, kernel: Kernel | str | None = None, name: str = "Solid"
+) -> ImportResult:
     """OD/ID profiles from one solid already in memory (e.g. a FreeCAD Part.Solid)."""
     kernel = _kernel(kernel)
     axis, odd, turned = _axis_and_faces(solid, kernel)
     warnings = []
     if turned < 0.5:
-        warnings.append(f"only {turned:.0%} of the surface is turned - check that this is the right part "
-                        "and that the profile makes sense")
+        warnings.append(
+            f"only {turned:.0%} of the surface is turned - check that this is the right part "
+            "and that the profile makes sense"
+        )
 
     best = None
     # A fully turned part looks the same at every angle, so one cut will do.
-    for ang in (ANGLES if odd else ANGLES[:1]):
+    for ang in ANGLES if odd else ANGLES[:1]:
         segs, notes = _section_segments(solid, axis, ang, kernel)
         if not segs:
             continue
@@ -426,18 +460,31 @@ def import_solid(solid, units: str = "inch", flip: bool = False,
         raise StepImportError("cutting the part through its axis gave nothing")
     area, angle, loop, chains, notes = best
     if len(chains) > 1:
-        warnings.append(f"the cut has {len(chains) - 1} separate piece(s) besides the main outline "
-                        "(cross holes, internal pockets) - ignored")
+        warnings.append(
+            f"the cut has {len(chains) - 1} separate piece(s) besides the main outline "
+            "(cross holes, internal pockets) - ignored"
+        )
     if odd:
-        warnings.append("part has features that are not turned (" + "; ".join(odd)
-                        + "). The profile is taken where the part is fullest - machine those features separately")
+        warnings.append(
+            "part has features that are not turned ("
+            + "; ".join(odd)
+            + "). The profile is taken where the part is fullest - machine those features separately"
+        )
 
     return finish_loop(loop, flip, units, warnings, name, angle, axis=axis, radial=_frame(axis, angle)[0])
 
 
-def finish_loop(loop: list[Seg], flip: bool, units: str, warnings: list[str], name: str,
-                angle: float, tol: float = TOL * 5, axis: Axis | None = None,
-                radial: tuple = (1.0, 0.0, 0.0)) -> ImportResult:
+def finish_loop(
+    loop: list[Seg],
+    flip: bool,
+    units: str,
+    warnings: list[str],
+    name: str,
+    angle: float,
+    tol: float = TOL * 5,
+    axis: Axis | None = None,
+    radial: tuple = (1.0, 0.0, 0.0),
+) -> ImportResult:
     """Shared by STEP and mesh import: put Z0 at the face, split into OD/ID, convert units.
     axis/radial say where the cut lies in the model (STEP import), so a CAD front end
     can draw the profile on the part; mesh import leaves them out."""
@@ -447,29 +494,54 @@ def finish_loop(loop: list[Seg], flip: bool, units: str, warnings: list[str], na
         loop = [s.mirrored(0.0) for s in loop]
         zmin, zmax = -zmax, -zmin
     # shift so the face end is Z0
-    loop = [Seg((s.p0[0] - zmax, s.p0[1]), (s.p1[0] - zmax, s.p1[1]), s.kind,
-                (s.center[0] - zmax, s.center[1]) if s.center else None, s.radius, s.direction, s.approx)
-            for s in loop]
+    loop = [
+        Seg(
+            (s.p0[0] - zmax, s.p0[1]),
+            (s.p1[0] - zmax, s.p1[1]),
+            s.kind,
+            (s.center[0] - zmax, s.center[1]) if s.center else None,
+            s.radius,
+            s.direction,
+            s.approx,
+        )
+        for s in loop
+    ]
     z_face = zmax
     zmin, zmax = zmin - zmax, 0.0
     length = zmax - zmin
 
     od_chain, id_chain = _split(loop, zmin, tol)
     if any(s.approx for s in od_chain + id_chain):
-        warnings.append("part of the outline isn't made of lines and arcs; it was approximated with "
-                        "short lines - check the shape on F2")
+        warnings.append(
+            "part of the outline isn't made of lines and arcs; it was approximated with "
+            "short lines - check the shape on F2"
+        )
     scale = 1 / MM_PER_INCH if units == "inch" else 1.0
     dec = 6 if units == "inch" else 4
     od = _to_profile(_merge_collinear(od_chain), "od", "od", scale, dec)
     idp = _to_profile(_merge_collinear(id_chain), "id", "id", scale, dec) if id_chain else None
     for prof in (od, idp):
         if prof is not None and prof.undercut_z() is not None:
-            warnings.append(f"the {prof.side.upper()} turns back toward the face at Z{prof.undercut_z():g} "
-                            "(a groove or slot cut from the back) - it can't be reached from the face; "
-                            "edit the shape on F2 or machine that feature from the other end")
+            warnings.append(
+                f"the {prof.side.upper()} turns back toward the face at Z{prof.undercut_z():g} "
+                "(a groove or slot cut from the back) - it can't be reached from the face; "
+                "edit the shape on F2 or machine that feature from the other end"
+            )
     rmax = max(p[1] for s in loop for p in s.points())
-    return ImportResult(od, idp, float(round(2 * rmax * scale, dec)), float(round(length * scale, dec)), units,
-                        warnings, name, angle, axis, radial, z_face, flip)
+    return ImportResult(
+        od,
+        idp,
+        float(round(2 * rmax * scale, dec)),
+        float(round(length * scale, dec)),
+        units,
+        warnings,
+        name,
+        angle,
+        axis,
+        radial,
+        z_face,
+        flip,
+    )
 
 
 def extend_to_stock(prof: Profile, stock_dia: float) -> Profile:
@@ -489,7 +561,7 @@ def _split(loop: list[Seg], zmin: float, tol: float = TOL * 5) -> tuple[list[Seg
     face_idx = [i for i, p in enumerate(verts) if near(p[0], 0.0)]
     if not face_idx:
         raise StepImportError("could not find the face end in the section")
-    start = min(face_idx, key=lambda i: verts[i][1])          # innermost point on the face
+    start = min(face_idx, key=lambda i: verts[i][1])  # innermost point on the face
 
     n = len(loop)
 
@@ -516,9 +588,11 @@ def _split(loop: list[Seg], zmin: float, tol: float = TOL * 5) -> tuple[list[Seg
 
     fwd = walk(start, True) if (closed or start < n) else []
     bwd = walk(start, False) if (closed or start > 0) else []
+
     # the OD path is the one that heads away from the axis first
     def first_r(path):
         return path[0].p1[1] if path else -1
+
     if first_r(fwd) >= first_r(bwd):
         od, idp = fwd, bwd
     else:

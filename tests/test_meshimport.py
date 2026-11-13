@@ -1,4 +1,5 @@
 """Mesh (STL / 3MF) import compared with the exact STEP import of the same parts."""
+
 import numpy as np
 import pytest
 
@@ -16,7 +17,7 @@ TOL = 0.0025  # inch: what a mesh import holds against the exact CAD outline (ar
 
 def deviation(a, b):
     """Largest distance (inch) from any point on outline a to outline b, both ways."""
-    pa = np.array(a.polyline(2.0)) * [1, 0.5]     # (z, diameter) -> (z, radius)
+    pa = np.array(a.polyline(2.0)) * [1, 0.5]  # (z, diameter) -> (z, radius)
     pb = np.array(b.polyline(2.0)) * [1, 0.5]
 
     def dense(p):
@@ -25,6 +26,7 @@ def deviation(a, b):
             n = max(1, int(np.linalg.norm(q - out[-1]) / 0.002))
             out.extend(out[-1] + (q - out[-1]) * k / n for k in range(1, n + 1))
         return np.array(out)
+
     pa, pb = dense(pa), dense(pb)
     d = np.linalg.norm(pa[:, None, :] - pb[None, :, :], axis=2)
     return max(d.min(1).max(), d.min(0).max())

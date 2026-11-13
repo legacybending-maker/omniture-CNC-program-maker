@@ -1,7 +1,8 @@
 """FreeCAD workbench, without the GUI. Runs only under FreeCAD's Python:
 
-    PYTHONPATH=/path/to/freecad/lib  /path/to/freecad/bin/python -m pytest tests/test_freecad_workbench.py
+PYTHONPATH=/path/to/freecad/lib  /path/to/freecad/bin/python -m pytest tests/test_freecad_workbench.py
 """
+
 import sys
 import tomllib
 from pathlib import Path
@@ -28,7 +29,7 @@ def doc():
     d = App.newDocument("OmniTurnTest")
     name = d.Name
     yield d
-    if name in App.listDocuments():    # a test may already have closed it
+    if name in App.listDocuments():  # a test may already have closed it
         App.closeDocument(name)
 
 
@@ -65,20 +66,22 @@ def test_profile_is_drawn_on_the_part_even_when_moved(doc):
     solid = src.Shape.Solids[0]
     for v in prof.Shape.Vertexes:
         assert solid.distToShape(Part.Vertex(v.Point))[0] < 1e-4
-    assert len(prof.Shape.Edges) == len(prof.OD) - 1   # one edge per segment (first line is the start)
-    assert any(isinstance(e.Curve, Part.Circle) for e in prof.Shape.Edges)   # the bead stays an arc
+    assert len(prof.Shape.Edges) == len(prof.OD) - 1  # one edge per segment (first line is the start)
+    assert any(isinstance(e.Curve, Part.Circle) for e in prof.Shape.Edges)  # the bead stays an arc
 
 
 def _on_part(prof, src):
     """Every vertex of the drawn profile lies on the part, both in global coordinates."""
-    def containers(obj):        # placement of the containers an object sits in
+
+    def containers(obj):  # placement of the containers an object sits in
         pl, parent = App.Placement(), obj.getParentGeoFeatureGroup()
         while parent is not None:
             pl = parent.Placement.multiply(pl)
             parent = parent.getParentGeoFeatureGroup()
         return pl
+
     solid_g = Part.getShape(src).Solids[0].transformGeometry(containers(src).toMatrix())
-    for v in prof.Shape.Vertexes:     # Shape vertices already include prof's own placement
+    for v in prof.Shape.Vertexes:  # Shape vertices already include prof's own placement
         p = containers(prof).multVec(v.Point)
         assert solid_g.distToShape(Part.Vertex(p))[0] < 1e-4
 
@@ -87,7 +90,7 @@ def test_profile_follows_placement(doc):
     src = add_step(doc, "manual")
     src.Placement = App.Placement(App.Vector(40, -15, 7), App.Rotation(App.Vector(1, 2, 0), 35))
     prof = make_profile(src)
-    prof.RunOutToStock = False    # the run-out goes out to the bar, off the part by design
+    prof.RunOutToStock = False  # the run-out goes out to the bar, off the part by design
     doc.recompute()
     assert prof.OD and not prof.Warnings
     _on_part(prof, src)
@@ -114,7 +117,7 @@ def test_feature_inside_a_body_means_the_body(doc):
     asm.Placement.Base = App.Vector(0, 80, 0)
     body = doc.addObject("PartDesign::Body", "Body")
     asm.addObject(body)
-    body.BaseFeature = add_step(doc, "manual")     # Body gets a BaseFeature object inside it
+    body.BaseFeature = add_step(doc, "manual")  # Body gets a BaseFeature object inside it
     doc.recompute()
     inner = [o for o in body.Group if o.isDerivedFrom("PartDesign::Feature")][0]
     prof = make_profile(inner)

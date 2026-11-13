@@ -3,6 +3,7 @@
 Jobs are stored as TOML so they can be hand-edited, diffed in git, and written
 by the fill-in-the-blank front end. See examples/ for the format.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -30,20 +31,20 @@ JOB_FORMAT = 1
 class Stock:
     diameter: float
     length: float | None = None
-    bore: float | None = None       # existing hole diameter, if any
+    bore: float | None = None  # existing hole diameter, if any
     material: str = ""
 
 
 @dataclass
 class Job:
-    name: str                       # also the program file name: max 8 characters
+    name: str  # also the program file name: max 8 characters
     units: Literal["inch", "metric"]
     stock: Stock
     setup: Setup
     profiles: dict[str, Profile] = field(default_factory=dict)
     operations: list[Operation] = field(default_factory=list)
     description: str = ""
-    include_subs: str | None = None     # file of subroutines appended after M30 (e.g. ZipLoader subs)
+    include_subs: str | None = None  # file of subroutines appended after M30 (e.g. ZipLoader subs)
 
     def external_subs(self) -> tuple[str, list[int]]:
         """Text of the include file and the subroutine numbers it defines."""
@@ -103,8 +104,10 @@ def job_from_dict(data: dict, library: ToolLibrary, base_dir: Path | None = None
     if not isinstance(fmt, int) or fmt < 1:
         raise ValueError(f"job file format {fmt!r} is not valid")
     if fmt > JOB_FORMAT:
-        raise ValueError(f"this job file is format {fmt}, written by a newer omniturn-cam; this version "
-                         f"reads up to format {JOB_FORMAT}. Update omniturn-cam to open it.")
+        raise ValueError(
+            f"this job file is format {fmt}, written by a newer omniturn-cam; this version "
+            f"reads up to format {JOB_FORMAT}. Update omniturn-cam to open it."
+        )
     setup = Setup()
     for st in data.get("station", []):
         setup.add(Station(int(st["t"]), library[st["tool"]], st.get("d")))
@@ -179,11 +182,20 @@ def op_to_dict(op: Operation) -> dict:
 
 def job_to_dict(job: Job) -> dict:
     return {
-        "job": _clean({"name": job.name, "format": JOB_FORMAT, "units": job.units, "description": job.description or None,
-                       "include_subs": job.include_subs}),
+        "job": _clean(
+            {
+                "name": job.name,
+                "format": JOB_FORMAT,
+                "units": job.units,
+                "description": job.description or None,
+                "include_subs": job.include_subs,
+            }
+        ),
         "stock": _clean(dataclasses.asdict(job.stock) | {"material": job.stock.material or None}),
-        "station": [_clean({"t": st.t, "tool": st.tool.id, "d": st.d})
-                    for st in sorted(job.setup.stations.values(), key=lambda s: s.t)],
+        "station": [
+            _clean({"t": st.t, "tool": st.tool.id, "d": st.d})
+            for st in sorted(job.setup.stations.values(), key=lambda s: s.t)
+        ],
         "profile": {name: profile_to_dict(p) for name, p in job.profiles.items()},
         "op": [op_to_dict(op) for op in job.operations],
     }
@@ -192,16 +204,16 @@ def job_to_dict(job: Job) -> dict:
 def _tomli_w():
     try:
         import tomli_w
-    except ImportError as e:   # FreeCAD's bundled Python may not have it
-        raise ImportError("saving job files needs the tomli-w package: pip install tomli-w "
-                          "(in FreeCAD, the Addon Manager installs it with the workbench)") from e
+    except ImportError as e:  # FreeCAD's bundled Python may not have it
+        raise ImportError(
+            "saving job files needs the tomli-w package: pip install tomli-w "
+            "(in FreeCAD, the Addon Manager installs it with the workbench)"
+        ) from e
     return tomli_w
 
 
 def save_job(job: Job, path: str | Path) -> None:
-    Path(path).write_text(
-        "# omniturn-cam job file\n" + _tomli_w().dumps(job_to_dict(job), multiline_strings=False)
-    )
+    Path(path).write_text("# omniturn-cam job file\n" + _tomli_w().dumps(job_to_dict(job), multiline_strings=False))
 
 
 def profiles_toml(profiles: dict[str, Profile]) -> str:

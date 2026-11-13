@@ -1,4 +1,5 @@
 """Workbench commands."""
+
 from __future__ import annotations
 
 import os
@@ -44,10 +45,12 @@ def _picked_solid_index(sel, shape) -> int:
 
 class ExtractProfile:
     def GetResources(self):
-        return {"Pixmap": icon("extract.svg"),
-                "MenuText": "Extract turned profile",
-                "ToolTip": "Find the turning axis of the selected solid and pull out its OD and ID "
-                           "profiles, ready for omniturn-cam"}
+        return {
+            "Pixmap": icon("extract.svg"),
+            "MenuText": "Extract turned profile",
+            "ToolTip": "Find the turning axis of the selected solid and pull out its OD and ID "
+            "profiles, ready for omniturn-cam",
+        }
 
     def IsActive(self):
         return App.ActiveDocument is not None
@@ -60,6 +63,7 @@ class ExtractProfile:
             return
         sel = picks[0]
         import Part
+
         try:
             shape = Part.getShape(sel.Object)
         except Exception:
@@ -75,23 +79,35 @@ class ExtractProfile:
 
 class SaveToJob:
     def GetResources(self):
-        return {"Pixmap": icon("savejob.svg"),
-                "MenuText": "Save profile to job file",
-                "ToolTip": "Write the selected profile's OD and ID into an omniturn-cam job (.toml). "
-                           "An existing job keeps its tools and operations; only the profiles are replaced"}
+        return {
+            "Pixmap": icon("savejob.svg"),
+            "MenuText": "Save profile to job file",
+            "ToolTip": "Write the selected profile's OD and ID into an omniturn-cam job (.toml). "
+            "An existing job keeps its tools and operations; only the profiles are replaced",
+        }
 
     def IsActive(self):
         return any(is_profile(o) for o in Gui.Selection.getSelection())
 
     def Activated(self):
         from .export import save_profiles
+
         profs = [o for o in Gui.Selection.getSelection() if is_profile(o)]
         obj = profs[0]
         params = App.ParamGet(PARAMS)
-        start = params.GetString("LastJobDir", "") or os.path.dirname(obj.Document.FileName or "") or os.path.expanduser("~")
+        start = (
+            params.GetString("LastJobDir", "")
+            or os.path.dirname(obj.Document.FileName or "")
+            or os.path.expanduser("~")
+        )
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            Gui.getMainWindow(), "Save profile to omniturn-cam job", start,
-            "omniturn-cam job (*.toml)", "", QtWidgets.QFileDialog.DontConfirmOverwrite)
+            Gui.getMainWindow(),
+            "Save profile to omniturn-cam job",
+            start,
+            "omniturn-cam job (*.toml)",
+            "",
+            QtWidgets.QFileDialog.DontConfirmOverwrite,
+        )
         if not path:
             return
         if not path.lower().endswith(".toml"):

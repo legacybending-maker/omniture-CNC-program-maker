@@ -1,11 +1,12 @@
 """Command line entry point.
 
-  omniturn-cam post JOB.toml --tools TOOLS.toml [-o OUT.cnc] [--plot OUT.png]
-  omniturn-cam lint PROGRAM.cnc
-  omniturn-cam plot PROGRAM.cnc OUT.png
-  omniturn-cam gui [JOB.toml]
-  omniturn-cam step PART.step|.stl|.3mf [--flip] [--stock DIA] [--into JOB.toml]
+omniturn-cam post JOB.toml --tools TOOLS.toml [-o OUT.cnc] [--plot OUT.png]
+omniturn-cam lint PROGRAM.cnc
+omniturn-cam plot PROGRAM.cnc OUT.png
+omniturn-cam gui [JOB.toml]
+omniturn-cam step PART.step|.stl|.3mf [--flip] [--stock DIA] [--into JOB.toml]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,8 +20,9 @@ from .tools import ToolLibrary
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="omniturn-cam", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="omniturn-cam", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("post", help="generate an OmniTurn program from a job file")
@@ -28,8 +30,11 @@ def main(argv=None) -> int:
     p.add_argument("--tools", required=True, help="tool library TOML")
     p.add_argument("-o", "--output", help="program file (default: JOBNAME.cnc next to the job)")
     p.add_argument("--plot", help="also write a backplot PNG")
-    p.add_argument("--machine", help="machine profile TOML (default: ~/.config/omniturn-cam/machine.toml "
-                                     "if present, else Hardinge HLV-H OmniTurn G4)")
+    p.add_argument(
+        "--machine",
+        help="machine profile TOML (default: ~/.config/omniturn-cam/machine.toml "
+        "if present, else Hardinge HLV-H OmniTurn G4)",
+    )
     p.add_argument("--stdout", action="store_true", help="print the program instead of writing it")
 
     l = sub.add_parser("lint", help="check a program against the OmniTurn formatting rules")
@@ -57,12 +62,14 @@ def main(argv=None) -> int:
 
     if a.cmd == "gui":
         from .gui.app import main as gui_main
+
         return gui_main(["omniturn-cam"] + ([a.job] if a.job else []))
 
     if a.cmd == "post":
         lib = ToolLibrary.load(a.tools)
         job = load_job(a.job, lib)
         from .post import MachineConfig
+
         mpath = Path(a.machine) if a.machine else Path.home() / ".config" / "omniturn-cam" / "machine.toml"
         machine = MachineConfig.load(mpath, job.units) if mpath.exists() else None
         warns: list[str] = []
@@ -81,6 +88,7 @@ def main(argv=None) -> int:
             print(f"wrote {out}")
         if a.plot:
             from .backplot import plot
+
             plot(code, a.plot, job.stock.diameter, f"{job.name}  {job.description}")
             print(f"wrote {a.plot}")
         return 0
@@ -95,6 +103,7 @@ def main(argv=None) -> int:
 
     if a.cmd == "plot":
         from .backplot import plot
+
         plot(Path(a.program).read_text(), a.png)
         return 0
     return 1
@@ -104,6 +113,7 @@ def _step(a) -> int:
     from .job import merge_profiles, profiles_toml
     from .modelimport import import_model, list_bodies
     from .stepimport import StepImportError, extend_to_stock
+
     try:
         if a.solid is None:
             solids = list_bodies(a.step)

@@ -1,6 +1,7 @@
 """The six step screens, in IGF order: job & blank, part shape, tool plate,
 processes, check, program. Each screen edits MainWindow.job in place and calls
 win.touched() after a change; refresh() reloads it from the job."""
+
 from __future__ import annotations
 
 import getpass
@@ -9,11 +10,31 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox,
-                               QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
-                               QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
-                               QScrollArea, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMenu,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..backplot import draw, draw_profile
 from ..fields import OP_MENU, OP_TOOL_KINDS, new_operation, summary
@@ -80,8 +101,10 @@ class JobScreen(Screen):
         subrow = QHBoxLayout()
         self.subs = QLineEdit()
         self.subs.setPlaceholderText("none")
-        self.subs.setToolTip("A file of saved subroutines (e.g. ZipLoader / bar-load subs) copied in below M30. "
-                             "Generated contour subroutines are numbered around it.")
+        self.subs.setToolTip(
+            "A file of saved subroutines (e.g. ZipLoader / bar-load subs) copied in below M30. "
+            "Generated contour subroutines are numbered around it."
+        )
         self.subs.editingFinished.connect(lambda: self._set("include_subs", self.subs.text().strip() or None))
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse_subs)
@@ -125,8 +148,9 @@ class JobScreen(Screen):
         self._preview()
 
     def _browse_subs(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Subroutine file", str(Path.home()),
-                                              "OmniTurn programs (*.cnc *.txt *);;All files (*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Subroutine file", str(Path.home()), "OmniTurn programs (*.cnc *.txt *);;All files (*)"
+        )
         if path:
             self.subs.setText(path)
             self._set("include_subs", path)
@@ -151,6 +175,7 @@ class JobScreen(Screen):
 
     def _preview(self):
         from ..post.omniturn import OmniTurnPost
+
         p = OmniTurnPost(self.job, self.win.machine)
         p.header()
         self.header.setPlainText("\n".join(p.lines))
@@ -231,13 +256,19 @@ class ShapeScreen(Screen):
         self.table.itemChanged.connect(lambda _i: self._rebuild())
         self.table.currentCellChanged.connect(lambda *_: self._draw())
         ll.addWidget(self.table)
-        row, _ = _buttons(("+ Line", lambda: self._add("line")), ("+ Arc", lambda: self._add("arc")),
-                          ("Delete row", self._del_row), ("Move up", lambda: self._move(-1)),
-                          ("Move down", lambda: self._move(1)))
+        row, _ = _buttons(
+            ("+ Line", lambda: self._add("line")),
+            ("+ Arc", lambda: self._add("arc")),
+            ("Delete row", self._del_row),
+            ("Move up", lambda: self._move(-1)),
+            ("Move down", lambda: self._move(1)),
+        )
         ll.addLayout(row)
-        hint = QLabel("X is diameter. Leave X or Z blank to keep the previous value. Corner C/R blends "
-                      "into the next line, like the OmniTurn's own C and R words. Arc direction is as "
-                      "seen on the print: face on the right, X+ up.")
+        hint = QLabel(
+            "X is diameter. Leave X or Z blank to keep the previous value. Corner C/R blends "
+            "into the next line, like the OmniTurn's own C and R words. Arc direction is as "
+            "seen on the print: face on the right, X+ up."
+        )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#667")
         ll.addWidget(hint)
@@ -313,8 +344,7 @@ class ShapeScreen(Screen):
                 else:
                     corner = self.table.cellWidget(r, 3).currentText()
                     size = self._cell(r, 4)
-                    prof.segments.append(Line(end, size if corner == "C" else None,
-                                              size if corner == "R" else None))
+                    prof.segments.append(Line(end, size if corner == "C" else None, size if corner == "R" else None))
             prof.validate()
         except ValueError as e:
             self.msg.setText(f"<span style='color:#b00'>{e}</span>")
@@ -369,15 +399,18 @@ class ShapeScreen(Screen):
     def _import_step(self):
         start = self.win.settings.value("step_dir", str(Path.home()))
         from ..modelimport import MODEL_FILTER
-        path, _ = QFileDialog.getOpenFileName(self, "Import shape from a 3D model", start,
-                                              MODEL_FILTER + ";;All files (*)")
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import shape from a 3D model", start, MODEL_FILTER + ";;All files (*)"
+        )
         if not path:
             return
         self.win.settings.setValue("step_dir", str(Path(path).parent))
         try:
             from .stepdialog import StepImportDialog
+
             dlg = StepImportDialog(path, self.job, self)
-        except Exception as e:   # missing OCP, unreadable file
+        except Exception as e:  # missing OCP, unreadable file
             QMessageBox.critical(self, "Import shape", str(e))
             return
         if dlg.exec() == QDialog.Accepted and dlg.result is not None:
@@ -471,8 +504,10 @@ class PlateScreen(Screen):
     def __init__(self, win):
         super().__init__(win)
         lay = QVBoxLayout(self)
-        info = QLabel("Which tool is in which station for this job. D is the secondary offset that "
-                      "holds the tool's nose radius for G41/G42 comp.")
+        info = QLabel(
+            "Which tool is in which station for this job. D is the secondary offset that "
+            "holds the tool's nose radius for G41/G42 comp."
+        )
         info.setWordWrap(True)
         info.setStyleSheet("color:#667")
         lay.addWidget(info)
@@ -481,8 +516,11 @@ class PlateScreen(Screen):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.verticalHeader().setVisible(False)
         lay.addWidget(self.table, 1)
-        row, _ = _buttons(("+ Station", self._add), ("Remove station", self._remove),
-                          ("Edit tool library… (F8)", self.win.edit_library))
+        row, _ = _buttons(
+            ("+ Station", self._add),
+            ("Remove station", self._remove),
+            ("Edit tool library… (F8)", self.win.edit_library),
+        )
         lay.addLayout(row)
 
     def refresh(self):
@@ -525,8 +563,11 @@ class PlateScreen(Screen):
             return
         t = sorted(self.job.setup.stations)[r]
         users = [i + 1 for i, op in enumerate(self.job.operations) if op.t == t]
-        if users and QMessageBox.question(self, "Remove station",
-                                          f"T{t} is used by process(es) {users}. Remove anyway?") != QMessageBox.Yes:
+        if (
+            users
+            and QMessageBox.question(self, "Remove station", f"T{t} is used by process(es) {users}. Remove anyway?")
+            != QMessageBox.Yes
+        ):
             return
         del self.job.setup.stations[t]
         self.win.touched()
@@ -574,8 +615,12 @@ class ProcessScreen(Screen):
             act.triggered.connect(lambda _c=False, k=kind: self._add(k))
         add.setMenu(menu)
         left.addWidget(add)
-        row, _ = _buttons(("Duplicate", self._dup), ("Delete", self._delete),
-                          ("Up", lambda: self._move(-1)), ("Down", lambda: self._move(1)))
+        row, _ = _buttons(
+            ("Duplicate", self._dup),
+            ("Delete", self._delete),
+            ("Up", lambda: self._move(-1)),
+            ("Down", lambda: self._move(1)),
+        )
         left.addLayout(row)
         lw = QWidget()
         lw.setLayout(left)
@@ -615,6 +660,7 @@ class ProcessScreen(Screen):
 
     def _add(self, kind):
         from ..ops import OPERATION_TYPES
+
         stations = sorted(self.job.setup.stations.values(), key=lambda s: s.t)
         if not OPERATION_TYPES[kind].uses_tool:
             op = OPERATION_TYPES[kind]()
@@ -641,6 +687,7 @@ class ProcessScreen(Screen):
 
     def _dup(self):
         import copy
+
         r = self.list.currentRow()
         if r >= 0:
             self.job.operations.insert(r + 1, copy.deepcopy(self.job.operations[r]))
@@ -676,10 +723,12 @@ class CheckScreen(Screen):
         right.addWidget(QLabel("<b>Rules check</b>"))
         self.msgs = QListWidget()
         right.addWidget(self.msgs, 1)
-        legend = QLabel("Backplot: feeds solid (colour per tool), rapids dotted, grey band = "
-                        "shape the G75/G78 cycle roughs to, shaded = bar stock.\n\n"
-                        "This is a preview of the code, not a simulation of the machine. "
-                        "Always run F4 Verify on the OmniTurn and single-block new programs.")
+        legend = QLabel(
+            "Backplot: feeds solid (colour per tool), rapids dotted, grey band = "
+            "shape the G75/G78 cycle roughs to, shaded = bar stock.\n\n"
+            "This is a preview of the code, not a simulation of the machine. "
+            "Always run F4 Verify on the OmniTurn and single-block new programs."
+        )
         legend.setWordWrap(True)
         legend.setStyleSheet("color:#667")
         right.addWidget(legend)
@@ -706,8 +755,7 @@ class CheckScreen(Screen):
         if not probs:
             self._msg("All OmniTurn formatting rules pass", "#2e7d32")
         n = code.count("\n")
-        self._msg(f"{n} lines, {len(self.job.operations)} processes, "
-                  f"{len(self.job.setup.stations)} tools", "#334")
+        self._msg(f"{n} lines, {len(self.job.operations)} processes, {len(self.job.setup.stations)} tools", "#334")
         ax = self.canvas.clear()
         draw(ax, code, self.job.stock.diameter)
         self.canvas.draw_idle()
@@ -741,8 +789,9 @@ class ProgramScreen(Screen):
         f.setPointSize(11)
         self.text.setFont(f)
         lay.addWidget(self.text, 1)
-        row, _ = _buttons(("Save to USB stick", self._usb), ("Save program as…", self._save_as),
-                          ("Copy to clipboard", self._copy))
+        row, _ = _buttons(
+            ("Save to USB stick", self._usb), ("Save program as…", self._save_as), ("Copy to clipboard", self._copy)
+        )
         lay.addLayout(row)
         self.code = None
 
@@ -753,8 +802,10 @@ class ProgramScreen(Screen):
             self.status.setText(f"<span style='color:#b00020'>{self.win.last_error}</span>")
         else:
             self.text.setPlainText(self.code)
-            self.status.setText(f"<b>{self.job.name}.cnc</b> &nbsp; {self.code.count(chr(10))} lines - "
-                                "prove out with F4 Verify and single block before running.")
+            self.status.setText(
+                f"<b>{self.job.name}.cnc</b> &nbsp; {self.code.count(chr(10))} lines - "
+                "prove out with F4 Verify and single block before running."
+            )
 
     def _write(self, path: Path):
         path.write_text(self.code.replace("\n", "\r\n"))  # DOS line endings for the OmniTurn
@@ -766,8 +817,11 @@ class ProgramScreen(Screen):
         mounts = usb_mounts()
         if len(mounts) == 1:
             target = mounts[0] / f"{self.job.name}.cnc"
-            if target.exists() and QMessageBox.question(
-                    self, "Save to USB", f"{target.name} already exists on the stick. Replace it?") != QMessageBox.Yes:
+            if (
+                target.exists()
+                and QMessageBox.question(self, "Save to USB", f"{target.name} already exists on the stick. Replace it?")
+                != QMessageBox.Yes
+            ):
                 return
             self._write(target)
         else:
@@ -778,12 +832,14 @@ class ProgramScreen(Screen):
         if not self.code:
             return
         start = start or str(Path.home())
-        path, _ = QFileDialog.getSaveFileName(self, "Save program", f"{start}/{self.job.name}.cnc",
-                                              "OmniTurn program (*.cnc *.txt)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save program", f"{start}/{self.job.name}.cnc", "OmniTurn program (*.cnc *.txt)"
+        )
         if path:
             self._write(Path(path))
 
     def _copy(self):
         if self.code:
             from PySide6.QtWidgets import QApplication
+
             QApplication.clipboard().setText(self.code)

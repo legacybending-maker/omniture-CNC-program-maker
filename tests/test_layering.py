@@ -5,6 +5,7 @@ with no GUI toolkit and no CAD kernel, so the same code serves the CLI, the
 standalone GUI and the FreeCAD workbench. These tests read the source, so they
 catch imports hidden inside functions too.
 """
+
 from __future__ import annotations
 
 import ast
@@ -37,7 +38,7 @@ def _imports(path: Path):
             for a in node.names:
                 yield a.name.split(".")[0], id(node) in top_level, None, node.lineno
         elif isinstance(node, ast.ImportFrom):
-            if node.level:   # relative: resolve against the package
+            if node.level:  # relative: resolve against the package
                 base = path.parent
                 for _ in range(node.level - 1):
                     base = base.parent

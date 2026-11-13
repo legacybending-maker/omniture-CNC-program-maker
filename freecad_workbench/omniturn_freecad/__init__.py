@@ -5,6 +5,7 @@ This package is only the FreeCAD front end. All the CAM logic lives in the
 standalone app uses too. The workbench adds that directory to sys.path so the
 two always come from the same checkout.
 """
+
 from __future__ import annotations
 
 import os

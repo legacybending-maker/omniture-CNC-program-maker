@@ -1,14 +1,30 @@
 """Tool library editor (F8)."""
+
 from __future__ import annotations
 
 import copy
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-                               QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
-                               QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..tools import KIND_DEFAULT_ORIENTATION, Tool, ToolKind
 from .widgets import NumberEdit
@@ -62,9 +78,11 @@ class ToolLibraryDialog(QDialog):
         self.hand.addItems(["left", "right", "neutral"])
         self.orient = QComboBox()
         self.orient.addItems(["radial", "axial", "perpendicular"])
-        self.orient.setToolTip("radial: edge points along X at the centreline (stick tools, cutoff)\n"
-                               "axial: parallel to Z (drills, bars, box tools, die heads)\n"
-                               "perpendicular: body perpendicular to the tool plate")
+        self.orient.setToolTip(
+            "radial: edge points along X at the centreline (stick tools, cutoff)\n"
+            "axial: parallel to Z (drills, bars, box tools, die heads)\n"
+            "perpendicular: body perpendicular to the tool plate"
+        )
         self.nose = NumberEdit(0.0, suffix="")
         self.dia = NumberEdit(None, optional=True, placeholder="-")
         self.width = NumberEdit(None, optional=True, placeholder="-")
@@ -105,8 +123,10 @@ class ToolLibraryDialog(QDialog):
         b = QPushButton("Remove")
         b.clicked.connect(lambda: self.params.removeRow(self.params.currentRow()))
         prow.addWidget(b)
-        tip = QLabel("Names that match a process field (feed, rpm, dwell, retract, sync…) are filled in "
-                     "automatically when this tool is used.")
+        tip = QLabel(
+            "Names that match a process field (feed, rpm, dwell, retract, sync…) are filled in "
+            "automatically when this tool is used."
+        )
         tip.setWordWrap(True)
         tip.setStyleSheet("color:#667")
         prow.addWidget(tip, 1)
@@ -197,12 +217,21 @@ class ToolLibraryDialog(QDialog):
             if k and k.text().strip():
                 params[k.text().strip()] = self._parse(v.text() if v else "")
         try:
-            updated = Tool(id=new_id, name=self.name.text().strip() or new_id, kind=self.kind.currentText(),
-                           hand=self.hand.currentText(), orientation=self.orient.currentText(),
-                           nose_radius=self.nose.value() or 0.0, diameter=self.dia.value(),
-                           width=self.width.value(), holder=self.holder.text().strip(),
-                           model=self.model.text().strip() or None, units=t.units,
-                           notes=self.notes.text().strip(), params=params)
+            updated = Tool(
+                id=new_id,
+                name=self.name.text().strip() or new_id,
+                kind=self.kind.currentText(),
+                hand=self.hand.currentText(),
+                orientation=self.orient.currentText(),
+                nose_radius=self.nose.value() or 0.0,
+                diameter=self.dia.value(),
+                width=self.width.value(),
+                holder=self.holder.text().strip(),
+                model=self.model.text().strip() or None,
+                units=t.units,
+                notes=self.notes.text().strip(),
+                params=params,
+            )
             if updated != t:
                 old_id = t.id
                 if old_id != new_id:
@@ -262,8 +291,9 @@ class ToolLibraryDialog(QDialog):
             self._fill_list()
 
     def _browse(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Tool model", str(self.path.parent),
-                                              "Tool models (*.step *.stp *.dxf);;All files (*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Tool model", str(self.path.parent), "Tool models (*.step *.stp *.dxf);;All files (*)"
+        )
         if path:
             self.model.setText(path)
 

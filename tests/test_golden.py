@@ -14,6 +14,7 @@ When a change to the output is intended:
 then review the diff of tests/golden/expected/ line by line and say in the PR
 that the output changed and why. Never regenerate them just to make a test pass.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -64,10 +65,15 @@ def _compare(path: Path, actual: str, what: str) -> None:
         return
     expected = path.read_text() if path.exists() else ""
     if actual != expected:
-        diff = "".join(difflib.unified_diff(expected.splitlines(True), actual.splitlines(True),
-                                            f"expected/{path.name}", "now", n=2))
-        pytest.fail(f"{what} changed. If this is intended, run UPDATE_GOLDEN=1 python -m pytest "
-                    f"tests/test_golden.py, review the diff and say so in the PR.\n\n{diff}")
+        diff = "".join(
+            difflib.unified_diff(
+                expected.splitlines(True), actual.splitlines(True), f"expected/{path.name}", "now", n=2
+            )
+        )
+        pytest.fail(
+            f"{what} changed. If this is intended, run UPDATE_GOLDEN=1 python -m pytest "
+            f"tests/test_golden.py, review the diff and say so in the PR.\n\n{diff}"
+        )
 
 
 @pytest.mark.parametrize("path", JOBS, ids=[p.stem for p in JOBS])
@@ -98,6 +104,7 @@ def test_no_orphan_expected_files():
 def test_machine_verified_programs_unchanged():
     """Programs proved out on the lathe (tests/golden/verified.toml) must not change silently."""
     import hashlib
+
     verified = tomllib.loads((GOLDEN / "verified.toml").read_text())
     stems = {p.stem for p in JOBS}
     problems = []
@@ -107,7 +114,9 @@ def test_machine_verified_programs_unchanged():
             continue
         digest = hashlib.sha256((EXPECTED / f"{name}.cnc").read_bytes()).hexdigest()
         if digest != entry["sha256"]:
-            problems.append(f"{name}: output differs from the program proved out on the machine "
-                            f"{entry.get('date', '')}. If intended, remove its entry from "
-                            "tests/golden/verified.toml in this PR and say so; it must be re-proved.")
+            problems.append(
+                f"{name}: output differs from the program proved out on the machine "
+                f"{entry.get('date', '')}. If intended, remove its entry from "
+                "tests/golden/verified.toml in this PR and say so; it must be re-proved."
+            )
     assert not problems, "\n".join(problems)
