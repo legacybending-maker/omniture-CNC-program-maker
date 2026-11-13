@@ -11,22 +11,22 @@ import math
 import re
 from dataclasses import dataclass, field
 
-from ..geometry import Arc, Line, Point, Profile
+from ..geometry import Arc, Point, Profile
 from ..job import Job
 from ..ops import (
     AxialPass,
     BoxRough,
+    CallSub,
     Cutoff,
     Drill,
     Face,
     Finish,
     Operation,
     RadialPass,
+    RawCode,
     Rough,
     Tap,
     Thread,
-    CallSub,
-    RawCode,
 )
 from ..tools import Station
 
@@ -62,7 +62,7 @@ class MachineConfig:
     first_sub: int = 1
 
     @classmethod
-    def for_units(cls, units: str, overrides: dict | None = None) -> "MachineConfig":
+    def for_units(cls, units: str, overrides: dict | None = None) -> MachineConfig:
         if units == "metric":
             m = cls(
                 units="metric",
@@ -85,7 +85,7 @@ class MachineConfig:
         return m
 
     @classmethod
-    def load(cls, path, units: str) -> "MachineConfig":
+    def load(cls, path, units: str) -> MachineConfig:
         """Read a machine.toml: top-level keys apply to both units, [inch]/[metric] tables
         override for one unit system."""
         import tomllib
@@ -388,7 +388,7 @@ class OmniTurnPost:
             )
 
         qa, qb = q(prof.start), q(prof.end)
-        for a, b in zip(qa, qb):
+        for a, b in zip(qa, qb, strict=True):
             if a and b and a != b:
                 raise PostError(
                     f"profile {prof.name!r}: start x{prof.start.x} z{prof.start.z} and end "

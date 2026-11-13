@@ -19,8 +19,9 @@ test suite runs the same STEP files through each one it can import.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Protocol
+from typing import Protocol
 
 
 @dataclass

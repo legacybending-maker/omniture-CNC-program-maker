@@ -16,10 +16,11 @@ import math
 import FreeCAD as App
 import Part
 
-from . import icon  # noqa: F401  (also puts omniturn_cam on sys.path)
 from omniturn_cam.geometry import Arc, Profile
 from omniturn_cam.job import profile_from_dict, profile_to_dict
 from omniturn_cam.stepimport import ImportResult, StepImportError, extend_to_stock, import_solid
+
+from . import icon  # noqa: F401  (also puts omniturn_cam on sys.path)
 
 MM_PER_INCH = 25.4
 OD_COLOR = (1.0, 0.45, 0.0)  # orange

@@ -9,14 +9,14 @@ description = "Conversational 2D lathe CAM for OmniTurn gang-tool lathes: profil
 readme = "README.md"
 license = "GPL-3.0-or-later"
 requires-python = ">=3.11"
-dependencies = ["tomli-w>=1.0"]
+dependencies = ["tomli-w>=1.0", "numpy>=1.24"]   # numpy: STL/3MF import
 
 [project.optional-dependencies]
 plot = ["matplotlib>=3.7"]
 gui = ["PySide6-Essentials>=6.5", "matplotlib>=3.7"]
 step = ["cadquery-ocp>=7.7"]
 all = ["PySide6-Essentials>=6.5", "matplotlib>=3.7", "cadquery-ocp>=7.7"]
-dev = ["pytest>=7", "matplotlib>=3.7"]
+dev = ["pytest>=7", "matplotlib>=3.7", "ruff==0.16.9"]
 
 [project.scripts]
 omniturn-cam = "omniturn_cam.cli:main"
@@ -41,7 +41,12 @@ extend-exclude = ["tests/data"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
-ignore = ["E741", "SIM108"]
+ignore = [
+  "E741",    # l / O / I names: used for G-code words (l = peck retract feed)
+  "E731",    # small lambdas as local helpers are fine
+  "B023",    # closures here are called inside the loop iteration that defines them
+  "SIM102", "SIM105", "SIM108",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E402"]

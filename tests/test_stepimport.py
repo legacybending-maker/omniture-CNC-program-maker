@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from omniturn_cam.geometry import Arc, Line  # noqa: F401
 from omniturn_cam import stepimport
+from omniturn_cam.geometry import Arc, Line  # noqa: F401
 from omniturn_cam.stepimport import StepImportError
 
 DATA = Path(__file__).parent / "data"

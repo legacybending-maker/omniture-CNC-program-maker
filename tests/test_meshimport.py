@@ -8,7 +8,6 @@ pytest.importorskip("OCP")
 import stepparts as sp  # noqa: E402
 
 from omniturn_cam.geometry import Arc  # noqa: E402
-from omniturn_cam.meshimport import import_mesh  # noqa: E402
 from omniturn_cam.modelimport import import_model  # noqa: E402
 from omniturn_cam.stepimport import StepImportError, import_step  # noqa: E402
 

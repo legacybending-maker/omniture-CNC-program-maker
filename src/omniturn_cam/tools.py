@@ -108,7 +108,7 @@ class ToolLibrary:
         return len(self._tools)
 
     @classmethod
-    def load(cls, path: str | Path) -> "ToolLibrary":
+    def load(cls, path: str | Path) -> ToolLibrary:
         path = Path(path)
         data = tomllib.loads(path.read_text())
         known = set(Tool.__dataclass_fields__)

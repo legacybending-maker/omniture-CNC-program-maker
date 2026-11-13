@@ -17,8 +17,9 @@ same way the OmniTurn's own ``C``/``R`` words work.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Iterator, Literal, Union
+from typing import Literal
 
 ArcDir = Literal["cw", "ccw"]
 
@@ -73,7 +74,7 @@ class Arc:
         return mz + sign * h * nz, mr + sign * h * nr
 
 
-Segment = Union[Line, Arc]
+Segment = Line | Arc
 
 
 @dataclass
@@ -86,12 +87,12 @@ class Profile:
     side: Literal["od", "id"] = "od"
 
     # -- convenience builders -------------------------------------------------
-    def line(self, x: float | None = None, z: float | None = None, *, c=None, r=None) -> "Profile":
+    def line(self, x: float | None = None, z: float | None = None, *, c=None, r=None) -> Profile:
         last = self.end
         self.segments.append(Line(Point(last.x if x is None else x, last.z if z is None else z), c, r))
         return self
 
-    def arc(self, x: float, z: float, radius: float, direction: ArcDir) -> "Profile":
+    def arc(self, x: float, z: float, radius: float, direction: ArcDir) -> Profile:
         self.segments.append(Arc(Point(x, z), radius, direction))
         return self
 
@@ -186,7 +187,7 @@ def expand_moves(start: Point, segments: list[Segment], step_deg: float = 5.0) -
     pts_r: list[tuple[float, float]] = [(start.z, start.r)]
     prev = start
     pending_corner = None  # (chamfer, radius) to apply at the last point
-    for i, seg in enumerate(segments):
+    for seg in segments:
         if isinstance(seg, Line):
             if pending_corner:
                 corner = pts_r.pop()

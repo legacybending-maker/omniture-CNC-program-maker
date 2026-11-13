@@ -149,11 +149,6 @@ def find_mesh_axis(body: MeshBody, tol_mm: float = 0.05):
     p, n, a = _facets(body)
     M = (n * a[:, None]).T @ n
     vals, vecs = np.linalg.eigh(M)
-    gaps = [
-        abs(vals[0] - vals[1]) + abs(vals[0] - vals[2]),
-        abs(vals[1] - vals[0]) + abs(vals[1] - vals[2]),
-        abs(vals[2] - vals[0]) + abs(vals[2] - vals[1]),
-    ]
     # the distinct eigenvalue is the one farthest from the other two
     k = int(np.argmax([min(abs(vals[i] - vals[j]) for j in range(3) if j != i) for i in range(3)]))
     d = vecs[:, k] / np.linalg.norm(vecs[:, k])

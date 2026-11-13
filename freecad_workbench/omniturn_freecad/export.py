@@ -5,9 +5,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .feature import MM_PER_INCH, profiles_of
 from omniturn_cam.job import Job, Stock, merge_profiles, save_job
 from omniturn_cam.tools import Setup
+
+from .feature import MM_PER_INCH, profiles_of
 
 
 def job_name(label: str) -> str:

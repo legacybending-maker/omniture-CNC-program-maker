@@ -183,11 +183,11 @@ class Seg:
     direction: str = ""  # arc: "ccw" / "cw" travelling p0 -> p1 (z right, r up)
     approx: bool = False  # a piece of a curve that wasn't a line or an arc
 
-    def reversed(self) -> "Seg":
+    def reversed(self) -> Seg:
         d = {"ccw": "cw", "cw": "ccw"}.get(self.direction, "")
         return Seg(self.p1, self.p0, self.kind, self.center, self.radius, d, self.approx)
 
-    def mirrored(self, zref: float) -> "Seg":
+    def mirrored(self, zref: float) -> Seg:
         """Mirror in z about zref (swaps which end is the face)."""
         m = lambda p: (2 * zref - p[0], p[1])
         c = m(self.center) if self.center else None

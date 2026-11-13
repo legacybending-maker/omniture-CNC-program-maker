@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 
+from OCP.BRep import BRep_Builder
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
 from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_MakeEdge,
@@ -13,7 +14,6 @@ from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_Transform,
 )
 from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakeRevol
-from OCP.BRep import BRep_Builder
 from OCP.GC import GC_MakeArcOfCircle
 from OCP.gp import gp_Ax1, gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
 from OCP.IFSelect import IFSelect_RetDone
@@ -130,7 +130,6 @@ def blind_hole_dome():
     z = lambda v: v * IN
     tip = 0.125 / math.tan(math.radians(59))
     dome_r = 0.5 * IN
-    mid = (z(-1.5) - dome_r * math.sin(math.radians(45)) + dome_r * 0, 0)
     return revolve(
         [
             ("start", (z(0), r(0.25))),
@@ -159,7 +158,9 @@ def write_stl(path, shape, ascii=False, deflection=0.002):
 def write_3mf(path, shape, offset=(150.0, 120.0, 0.0), deflection=0.002):
     """A minimal 3MF like a slicer saves: mesh in an object, placed by an item transform."""
     import zipfile
+
     import numpy as np
+
     from omniturn_cam.meshimport import read_stl
 
     tmp = str(path) + ".stl"

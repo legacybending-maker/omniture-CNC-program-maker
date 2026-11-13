@@ -41,7 +41,6 @@ from ..fields import OP_MENU, OP_TOOL_KINDS, new_operation, summary
 from ..geometry import Arc, Line, Point, Profile
 from ..job import NAME_RE
 from ..lint import lint
-from ..post import PostError, post
 from ..tools import Station
 from .forms import OperationForm
 from .widgets import UNIT_SUFFIX, NumberEdit, PlotCanvas, fmt_num
