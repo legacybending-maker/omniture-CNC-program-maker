@@ -1,7 +1,7 @@
 """STEP import: turn a solid of revolution into OD and ID profiles.
 
 How it works
-1. Read the STEP file (OpenCascade via the `OCP` package) and list its solids.
+1. Read the STEP file and list its solids.
 2. Find the turning axis: the axis shared by the largest area of cylindrical,
    conical, toroidal and revolved faces.
 3. Cut the solid with planes through that axis at several angles and keep the
@@ -12,16 +12,26 @@ How it works
    the loop at the face into the OD profile (outward, then toward the chuck)
    and the ID profile (into the bore).
 
+Nothing here imports a CAD kernel. Reading files, describing faces and cutting
+sections go through a ``kernels`` object (OpenCascade via cadquery-ocp for the
+standalone app, FreeCAD's Part module inside FreeCAD), so the same code drives
+both.
+
 Everything here works in the part's own (z, r) plane: z along the axis, r the
 distance from it. Profiles come out with diameters, like the rest of the app.
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
+from . import kernels
 from .geometry import Arc, Line, Point, Profile
+from .kernels import Kernel, SolidInfo
+
+__all__ = ["StepImportError", "SolidInfo", "Axis", "ImportResult", "read_solids", "find_axis",
+           "import_step", "import_solid", "finish_loop", "extend_to_stock"]
 
 MM_PER_INCH = 25.4
 TOL = 1e-4          # mm, for joining edge ends
@@ -32,78 +42,32 @@ class StepImportError(ValueError):
     pass
 
 
-def _cast(kind: str, shape):
-    """TopoDS.Solid / Face / Edge downcast; OCP 7.x names them Solid_s etc."""
-    from OCP.TopoDS import TopoDS
-    fn = getattr(TopoDS, kind + "_s", None) or getattr(TopoDS, kind)
-    return fn(shape)
-
-
-def _occ():
+def _kernel(kernel: Kernel | str | None) -> Kernel:
+    if kernel is not None and not isinstance(kernel, str):
+        return kernel
     try:
-        import OCP  # noqa: F401
-    except ImportError as e:
-        raise StepImportError(
-            "STEP import needs the OpenCascade bindings: pip install cadquery-ocp "
-            "(or pip install -e \".[step]\")") from e
+        return kernels.get(kernel)
+    except kernels.KernelUnavailable as e:
+        raise StepImportError(str(e)) from e
 
 
 # ----------------------------------------------------------------------------- reading
-@dataclass
-class SolidInfo:
-    index: int
-    name: str
-    volume: float          # mm^3
-    size: tuple            # bounding box dx, dy, dz in mm
-    shape: object = field(repr=False, default=None)
-
-
 _CACHE: dict = {}
 
 
-def read_solids(path: str | Path) -> list[SolidInfo]:
-    """Solids in a STEP file. Cached per file (path, size, mtime): big assemblies
-    take a while to read, and the import window re-imports on every flip."""
+def read_solids(path: str | Path, kernel: Kernel | str | None = None) -> list[SolidInfo]:
+    """Solids in a STEP file. Cached per file (path, size, mtime) and kernel: big
+    assemblies take a while to read, and the import window re-imports on every flip."""
+    kernel = _kernel(kernel)
     st = Path(path).stat()
-    key = (str(Path(path).resolve()), st.st_size, st.st_mtime)
+    key = (str(Path(path).resolve()), st.st_size, st.st_mtime, kernel.name)
     if key not in _CACHE:
+        out = kernel.read_solids(path)
+        if not out:
+            raise StepImportError(f"{Path(path).name} has no solids (is it a surface model?)")
         _CACHE.clear()
-        _CACHE[key] = _read_solids(path)
+        _CACHE[key] = out
     return _CACHE[key]
-
-
-def _read_solids(path: str | Path) -> list[SolidInfo]:
-    _occ()
-    from OCP.Bnd import Bnd_Box
-    from OCP.BRepBndLib import BRepBndLib
-    from OCP.BRepGProp import BRepGProp
-    from OCP.GProp import GProp_GProps
-    from OCP.IFSelect import IFSelect_RetDone
-    from OCP.STEPControl import STEPControl_Reader
-    from OCP.TopAbs import TopAbs_SOLID
-    from OCP.TopExp import TopExp_Explorer
-
-    reader = STEPControl_Reader()
-    if reader.ReadFile(str(path)) != IFSelect_RetDone:
-        raise StepImportError(f"could not read {path} as a STEP file")
-    reader.TransferRoots()
-    shape = reader.OneShape()
-    out = []
-    exp = TopExp_Explorer(shape, TopAbs_SOLID)
-    while exp.More():
-        solid = _cast("Solid", exp.Current())
-        props = GProp_GProps()
-        BRepGProp.VolumeProperties_s(solid, props)
-        box = Bnd_Box()
-        BRepBndLib.Add_s(solid, box)
-        lo, hi = box.CornerMin(), box.CornerMax()
-        x0, y0, z0, x1, y1, z1 = lo.X(), lo.Y(), lo.Z(), hi.X(), hi.Y(), hi.Z()
-        out.append(SolidInfo(len(out), f"Solid {len(out) + 1}", abs(props.Mass()),
-                             (x1 - x0, y1 - y0, z1 - z0), solid))
-        exp.Next()
-    if not out:
-        raise StepImportError(f"{Path(path).name} has no solids (is it a surface model?)")
-    return out
 
 
 # ----------------------------------------------------------------------------- axis
@@ -112,10 +76,6 @@ class Axis:
     loc: tuple
     dir: tuple
     area: float = 0.0
-
-
-def _v(p):
-    return (p.X(), p.Y(), p.Z())
 
 
 def _sub(a, b):
@@ -141,77 +101,61 @@ def _line_dist(p, axis: Axis):
     return math.sqrt(_dot(c, c))
 
 
-def _faces(shape):
-    from OCP.TopAbs import TopAbs_FACE
-    from OCP.TopExp import TopExp_Explorer
-    from OCP.TopoDS import TopoDS
-    exp = TopExp_Explorer(shape, TopAbs_FACE)
-    while exp.More():
-        yield _cast("Face", exp.Current())
-        exp.Next()
+def _on_axis(face_axis, axis: Axis) -> bool:
+    loc, d = face_axis
+    return abs(abs(_dot(_norm(d), axis.dir)) - 1) < 1e-7 and _line_dist(loc, axis) < 1e-3
 
 
-def find_axis(solid) -> tuple[Axis, list[str]]:
+def find_axis(solid, kernel: Kernel | str | None = None) -> tuple[Axis, list[str]]:
     """Turning axis plus a list of faces that are not turned features."""
-    from OCP.BRepAdaptor import BRepAdaptor_Surface
-    from OCP.BRepGProp import BRepGProp
-    from OCP.GeomAbs import (GeomAbs_Cone, GeomAbs_Cylinder, GeomAbs_Plane, GeomAbs_Sphere,
-                             GeomAbs_SurfaceOfRevolution, GeomAbs_Torus)
-    from OCP.GProp import GProp_GProps
+    axis, odd, _ = _axis_and_faces(solid, _kernel(kernel))
+    return axis, odd
 
-    faces = []
-    for f in _faces(solid):
-        s = BRepAdaptor_Surface(f)
-        props = GProp_GProps()
-        BRepGProp.SurfaceProperties_s(f, props)
-        t = s.GetType()
-        ax = None
-        if t == GeomAbs_Cylinder:
-            ax = s.Cylinder().Axis()
-        elif t == GeomAbs_Cone:
-            ax = s.Cone().Axis()
-        elif t == GeomAbs_Torus:
-            ax = s.Torus().Axis()
-        elif t == GeomAbs_SurfaceOfRevolution:
-            ax = s.AxeOfRevolution()
-        info = {"type": t, "area": props.Mass(), "surf": s}
-        if ax is not None:
-            info["axis"] = (_v(ax.Location()), _norm(_v(ax.Direction())))
-        faces.append(info)
 
+def _axis_and_faces(solid, kernel: Kernel) -> tuple[Axis, list[str], float]:
+    """Axis, notes on faces that aren't turned, and the share of the surface that is turned."""
+    faces = kernel.faces(solid)
+    total = sum(f.area for f in faces) or 1.0
+    free = sum(f.area for f in faces if f.kind == "other")
+    if free > 0.5 * total:
+        raise StepImportError(
+            f"{free / total:.0%} of this solid's surface is free-form (springs, castings, moulded "
+            "parts) - it isn't a turned part")
     clusters: list[Axis] = []
     for f in faces:
-        if "axis" not in f:
+        if f.axis is None:
             continue
-        loc, d = f["axis"]
         for c in clusters:
-            if abs(abs(_dot(d, c.dir)) - 1) < 1e-7 and _line_dist(loc, c) < 1e-3:
-                c.area += f["area"]
+            if _on_axis(f.axis, c):
+                c.area += f.area
                 break
         else:
-            clusters.append(Axis(loc, d, f["area"]))
+            clusters.append(Axis(f.axis[0], _norm(f.axis[1]), f.area))
     if not clusters:
         raise StepImportError("no round faces found - this doesn't look like a turned part")
     axis = max(clusters, key=lambda c: c.area)
 
     odd = []
+    turned = 0.0
     for f in faces:
-        t = f["type"]
-        if "axis" in f:
-            loc, d = f["axis"]
-            if not (abs(abs(_dot(d, axis.dir)) - 1) < 1e-7 and _line_dist(loc, axis) < 1e-3):
+        if f.axis is not None:
+            if _on_axis(f.axis, axis):
+                turned += f.area
+            else:
                 odd.append("round face off the turning axis (cross hole, off-centre feature)")
-        elif t == GeomAbs_Plane:
-            n = _norm(_v(f["surf"].Plane().Axis().Direction()))
-            if abs(abs(_dot(n, axis.dir)) - 1) > 1e-6:
+        elif f.kind == "plane":
+            if abs(abs(_dot(_norm(f.normal), axis.dir)) - 1) > 1e-6:
                 odd.append("flat face not square to the axis (flat, slot, hex)")
-        elif t == GeomAbs_Sphere:
-            c = _v(f["surf"].Sphere().Location())
-            if _line_dist(c, axis) > 1e-3:
+            else:
+                turned += f.area
+        elif f.kind == "sphere":
+            if _line_dist(f.center, axis) > 1e-3:
                 odd.append("sphere off the axis")
+            else:
+                turned += f.area
         else:
             odd.append("free-form face")
-    return axis, sorted(set(odd))
+    return axis, sorted(set(odd)), turned / total
 
 
 # ----------------------------------------------------------------------------- section
@@ -252,39 +196,29 @@ class Seg:
                  self.center[1] + self.radius * math.sin(a0 + (a1 - a0) * i / n)) for i in range(n + 1)]
 
 
-def _section_segments(solid, axis: Axis, angle_deg: float) -> tuple[list[Seg], list[str]]:
-    from OCP.BRepAdaptor import BRepAdaptor_Curve
-    from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
-    from OCP.GeomAbs import GeomAbs_Circle, GeomAbs_Line
-    from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
-    from OCP.TopAbs import TopAbs_EDGE
-    from OCP.TopExp import TopExp_Explorer
-    from OCP.TopoDS import TopoDS
-
+def _frame(axis: Axis, angle_deg: float) -> tuple[tuple, tuple]:
+    """In-plane radial direction u and plane normal n for a cut at angle_deg."""
     a = axis.dir
     ref = (1, 0, 0) if abs(a[0]) < 0.9 else (0, 1, 0)
     u0 = _norm(_cross(a, ref))
     w0 = _cross(a, u0)
     th = math.radians(angle_deg)
-    u = tuple(math.cos(th) * u0[i] + math.sin(th) * w0[i] for i in range(3))   # in-plane radial dir
-    n = _cross(a, u)                                                            # plane normal
-    sec = BRepAlgoAPI_Section(solid, gp_Pln(gp_Pnt(*axis.loc), gp_Dir(*n)))
-    sec.Build()
-    if not sec.IsDone():
-        raise StepImportError("OpenCascade could not cut the part through its axis")
+    u = tuple(math.cos(th) * u0[i] + math.sin(th) * w0[i] for i in range(3))
+    return u, _cross(a, u)
+
+
+def _section_segments(solid, axis: Axis, angle_deg: float, kernel: Kernel) -> tuple[list[Seg], list[str]]:
+    a = axis.dir
+    u, n = _frame(axis, angle_deg)
 
     def local(p):
         d = _sub(p, axis.loc)
         return (_dot(d, a), _dot(d, u))
 
     segs, notes = [], []
-    exp = TopExp_Explorer(sec.Shape(), TopAbs_EDGE)
-    while exp.More():
-        e = _cast("Edge", exp.Current())
-        exp.Next()
-        c = BRepAdaptor_Curve(e)
-        t0, t1 = c.FirstParameter(), c.LastParameter()
-        f = lambda t: local(_v(c.Value(t)))
+    for e in kernel.section(solid, axis.loc, n):
+        t0, t1 = e.t0, e.t1
+        f = lambda t: local(e.value(t))
         r0, r1 = f(t0)[1], f(t1)[1]
         # keep only the r >= 0 half; split edges that cross the axis
         tm = (t0 + t1) / 2
@@ -303,26 +237,22 @@ def _section_segments(solid, axis: Axis, angle_deg: float) -> tuple[list[Seg], l
             else:
                 t1 = hi
         p0, p1, pm = f(t0), f(t1), f((t0 + t1) / 2)
-        if math.dist(p0, p1) < TOL and c.GetType() == GeomAbs_Line:
+        if math.dist(p0, p1) < TOL and e.kind == "line":
             continue
         p0 = (p0[0], max(p0[1], 0.0))
         p1 = (p1[0], max(p1[1], 0.0))
-        typ = c.GetType()
-        if typ == GeomAbs_Line:
+        if e.kind == "line":
             segs.append(Seg(p0, p1))
-        elif typ == GeomAbs_Circle:
-            circ = c.Circle()
-            ctr = local(_v(circ.Location()))
+        elif e.kind == "circle":
+            ctr = local(e.center)
             cross = (pm[0] - p0[0]) * (p1[1] - pm[1]) - (pm[1] - p0[1]) * (p1[0] - pm[0])
             d = "ccw" if cross > 0 else "cw"
-            seg = Seg(p0, p1, "arc", ctr, circ.Radius(), d)
             # split arcs of 180 deg or more so every piece is a minor arc
-            sweep = abs(t1 - t0)
-            if sweep > math.pi * 0.98:
-                segs.append(Seg(p0, pm, "arc", ctr, circ.Radius(), d))
-                segs.append(Seg(pm, p1, "arc", ctr, circ.Radius(), d))
+            if abs(t1 - t0) > math.pi * 0.98:
+                segs.append(Seg(p0, pm, "arc", ctr, e.radius, d))
+                segs.append(Seg(pm, p1, "arc", ctr, e.radius, d))
             else:
-                segs.append(seg)
+                segs.append(Seg(p0, p1, "arc", ctr, e.radius, d))
         else:
             # Some exporters / transforms hand back B-splines for what is really a
             # line or an arc: recognise them by shape, otherwise use short lines.
@@ -425,6 +355,20 @@ class ImportResult:
     warnings: list[str]
     solid: str
     angle: float
+    # where the profile sits in the model, so a CAD front end can draw it on the part
+    axis: Axis | None = None
+    radial: tuple = (1.0, 0.0, 0.0)   # in-plane direction of r+ for the chosen cut
+    z_face: float = 0.0               # axial position of Z0 (mm, before the flip)
+    flip: bool = False
+
+    def to_model(self, x: float, z: float) -> tuple:
+        """Model-space point (mm) for a profile point: x diameter, z axial, in self.units."""
+        k = MM_PER_INCH if self.units == "inch" else 1.0
+        zl = z * k + self.z_face
+        if self.flip:
+            zl = -zl
+        r = x * k / 2
+        return tuple(self.axis.loc[i] + self.axis.dir[i] * zl + self.radial[i] * r for i in range(3))
 
 
 def _to_profile(chain: list[Seg], name: str, side: str, scale: float, decimals: int) -> Profile:
@@ -442,30 +386,40 @@ def _to_profile(chain: list[Seg], name: str, side: str, scale: float, decimals: 
 
 
 def import_step(path: str | Path, solid_index: int | None = None, units: str = "inch",
-                flip: bool = False) -> ImportResult:
+                flip: bool = False, kernel: Kernel | str | None = None) -> ImportResult:
     """Read a STEP file and return OD/ID profiles with Z0 at the face end.
 
     flip=False puts Z0 at the end the turning axis points to; flip=True uses the
     other end. Arcs come out in print terms (face right, X+ up)."""
-    solids = read_solids(path)
+    kernel = _kernel(kernel)
+    solids = read_solids(path, kernel)
     if solid_index is None:
         if len(solids) > 1:
             raise StepImportError(f"{Path(path).name} has {len(solids)} solids - choose one")
         solid_index = 0
     info = solids[solid_index]
-    axis, odd = find_axis(info.shape)
+    return import_solid(info.shape, units, flip, kernel, info.name)
+
+
+def import_solid(solid, units: str = "inch", flip: bool = False,
+                 kernel: Kernel | str | None = None, name: str = "Solid") -> ImportResult:
+    """OD/ID profiles from one solid already in memory (e.g. a FreeCAD Part.Solid)."""
+    kernel = _kernel(kernel)
+    axis, odd, turned = _axis_and_faces(solid, kernel)
     warnings = []
+    if turned < 0.5:
+        warnings.append(f"only {turned:.0%} of the surface is turned - check that this is the right part "
+                        "and that the profile makes sense")
 
     best = None
-    areas = []
-    for ang in ANGLES:
-        segs, notes = _section_segments(info.shape, axis, ang)
+    # A fully turned part looks the same at every angle, so one cut will do.
+    for ang in (ANGLES if odd else ANGLES[:1]):
+        segs, notes = _section_segments(solid, axis, ang, kernel)
         if not segs:
             continue
         chains = _chains(segs)
         main = max(chains, key=_area)
         a = _area(main)
-        areas.append(a)
         if best is None or a > best[0] + 1e-9:
             best = (a, ang, main, chains, notes)
     if best is None:
@@ -474,16 +428,19 @@ def import_step(path: str | Path, solid_index: int | None = None, units: str = "
     if len(chains) > 1:
         warnings.append(f"the cut has {len(chains) - 1} separate piece(s) besides the main outline "
                         "(cross holes, internal pockets) - ignored")
-    if odd or (max(areas) - min(areas)) > 1e-3 * max(areas):
-        warnings.append("part has features that are not turned (" + "; ".join(odd or ["varies around the axis"])
+    if odd:
+        warnings.append("part has features that are not turned (" + "; ".join(odd)
                         + "). The profile is taken where the part is fullest - machine those features separately")
 
-    return finish_loop(loop, flip, units, warnings, info.name, angle)
+    return finish_loop(loop, flip, units, warnings, name, angle, axis=axis, radial=_frame(axis, angle)[0])
 
 
 def finish_loop(loop: list[Seg], flip: bool, units: str, warnings: list[str], name: str,
-                angle: float, tol: float = TOL * 5) -> ImportResult:
-    """Shared by STEP and mesh import: put Z0 at the face, split into OD/ID, convert units."""
+                angle: float, tol: float = TOL * 5, axis: Axis | None = None,
+                radial: tuple = (1.0, 0.0, 0.0)) -> ImportResult:
+    """Shared by STEP and mesh import: put Z0 at the face, split into OD/ID, convert units.
+    axis/radial say where the cut lies in the model (STEP import), so a CAD front end
+    can draw the profile on the part; mesh import leaves them out."""
     zs = [p[0] for s in loop for p in s.points()]
     zmin, zmax = min(zs), max(zs)
     if flip:
@@ -493,6 +450,7 @@ def finish_loop(loop: list[Seg], flip: bool, units: str, warnings: list[str], na
     loop = [Seg((s.p0[0] - zmax, s.p0[1]), (s.p1[0] - zmax, s.p1[1]), s.kind,
                 (s.center[0] - zmax, s.center[1]) if s.center else None, s.radius, s.direction, s.approx)
             for s in loop]
+    z_face = zmax
     zmin, zmax = zmin - zmax, 0.0
     length = zmax - zmin
 
@@ -511,7 +469,7 @@ def finish_loop(loop: list[Seg], flip: bool, units: str, warnings: list[str], na
                             "edit the shape on F2 or machine that feature from the other end")
     rmax = max(p[1] for s in loop for p in s.points())
     return ImportResult(od, idp, float(round(2 * rmax * scale, dec)), float(round(length * scale, dec)), units,
-                        warnings, name, angle)
+                        warnings, name, angle, axis, radial, z_face, flip)
 
 
 def extend_to_stock(prof: Profile, stock_dia: float) -> Profile:

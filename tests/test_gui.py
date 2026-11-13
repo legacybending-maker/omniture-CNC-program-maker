@@ -90,11 +90,14 @@ def test_die_head_process_prefills_from_tool(win):
     assert op.sync is True and op.feed == 0.05
 
 
-def test_step_import_dialog_fills_shapes(win, tmp_path):
-    pytest.importorskip("OCP")
-    import stepparts as sp
+def test_step_import_dialog_fills_shapes(win):
+    from omniturn_cam import kernels
+    try:
+        kernels.get()                # OCP or FreeCAD, whichever is installed
+    except kernels.KernelUnavailable:
+        pytest.skip("no geometry kernel")
     from omniturn_cam.gui.stepdialog import StepImportDialog
-    path = sp.write(tmp_path / "bush.step", sp.bushing())
+    path = Path(__file__).parent / "data" / "bush.step"
     win.job.stock.diameter = 0.75
     dlg = StepImportDialog(str(path), win.job, win)
     dlg.flip.setChecked(True)

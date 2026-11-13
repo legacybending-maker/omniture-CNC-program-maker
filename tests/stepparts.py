@@ -162,3 +162,26 @@ def write_3mf(path, shape, offset=(150.0, 120.0, 0.0), deflection=0.002):
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("3D/3dmodel.model", model)
     return path
+
+
+def make_fixtures(d):
+    """Write the STEP files the import tests use (tests/data). Re-run after
+    changing a part:  python tests/stepparts.py"""
+    from pathlib import Path
+    d = Path(d)
+    d.mkdir(parents=True, exist_ok=True)
+    feat = cut(cut(manual_part(), cross_hole(-0.6 * IN, 0.125 * IN)), flat(0.15 * IN, -0.74 * IN, -0.5 * IN))
+    return {
+        "manual": write(d / "manual.step", manual_part()),
+        "moved": write(d / "moved.step", move(manual_part(), 10, -5, 30, (1, 1, 0), 63)),
+        "bush": write(d / "bush.step", bushing()),
+        "features": write(d / "features.step", feat),
+        "blind": write(d / "blind.step", blind_hole_dome()),
+        "two": write(d / "two.step", manual_part(), move(bushing(), 80, 0, 0)),
+    }
+
+
+if __name__ == "__main__":
+    import pathlib
+    for name, path in make_fixtures(pathlib.Path(__file__).parent / "data").items():
+        print(name, path)
