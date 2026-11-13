@@ -33,3 +33,16 @@ pythonpath = ["src", "tests"]
 
 [tool.setuptools.package-data]
 omniturn_cam = ["data/*.toml"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["tests/data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["E741", "SIM108"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]
+"freecad_workbench/*" = ["E402"]

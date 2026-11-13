@@ -1,0 +1,102 @@
+# Golden-output job in millimetres: G71 output, metric feeds and rapid,
+# multi-start angle-infeed thread with a spring pass, CSS, I/K-free R arcs.
+#
+# Tool library: examples/tools.toml
+
+[job]
+name = "MET20"
+units = "metric"
+description = "Golden metric pin"
+
+[stock]
+diameter = 20.0
+material = "303 stainless"
+
+[[station]]
+t = 1
+tool = "lh-turn-35"
+d = 1
+
+[[station]]
+t = 4
+tool = "thread-od-60"
+
+[[station]]
+t = 5
+tool = "cutoff-062"
+
+[[station]]
+t = 9
+tool = "box-bore"
+
+[profile.od]
+side = "od"
+start = { x = 0, z = 0 }
+seg = [
+  { x = 12.0, r = 1.0 },
+  { z = -18.0 },
+  { x = 16.0, z = -20.0, arc = "cw", r = 2.0 },
+  { z = -30.0 },
+  { x = 20.0 },
+]
+
+[[op]]
+type = "face"
+t = 1
+rpm = 1800
+stock = 0.5
+depth_per_pass = 0.25
+feed = 0.08
+
+[[op]]
+type = "rough"
+t = 1
+sfm = 120
+max_rpm = 3000
+profile = "od"
+cycle = "g75"
+depth = 1.0
+u = 0.2
+feed = 0.15
+
+[[op]]
+type = "finish"
+t = 1
+rpm = 2500
+profile = "od"
+feed = 0.05
+
+[[op]]
+type = "axial"
+t = 9
+rpm = 800
+x = 0
+z_start = 1.0
+z_end = -6.0
+feed = 0.1
+retract = "feed"
+retract_feed = 0.2
+
+[[op]]
+type = "thread"
+t = 4
+rpm = 300
+side = "od"
+major = 12.0
+minor = 10.16
+z_start = 0.0
+z_end = -15.0
+lead = 1.5
+starts = 2
+first_depth = 0.4
+runup = 4.0
+infeed_angle = 29
+spring_passes = 1
+comment = "M12 2 start"
+
+[[op]]
+type = "cutoff"
+t = 5
+rpm = 1200
+z = -31.6
+feed = 0.03

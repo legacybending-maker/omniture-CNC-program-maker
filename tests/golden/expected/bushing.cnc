@@ -1,0 +1,144 @@
+(BUSH01)
+(GOLDEN BUSHING)
+(UNITS INCH G70)
+(DIAMETER MODE G72 ABSOLUTE G90)
+(HARDINGE HLV H OMNITURN G4)
+g40
+g70
+g90g72g94g97f300
+(LOAD BAR)
+m98p1
+g00
+t1(LH TURN TOOL)
+x1.1z1
+m03s1528
+m08
+(FACE)
+z.065
+g96s400
+g77s3500
+z.015
+g95f.003x-.0312
+g00z.065
+x1.1
+z0
+g01x-.0312
+g00z.05
+x1.1
+g97
+s1528
+s2400
+(BOX ROUGH FLANGE)
+g95f.004
+g74x.96z-.59i.03u.01f.004
+g95f.003
+g78u.01f.003p2
+s1910
+g00x.25
+g96s500
+g76s800
+g77s4000
+g41
+g95f.0015z0d1
+x.75c.02
+z-.4
+x.95c.015
+z-.6
+x1
+x1.0936
+g00z.05
+g40
+g97
+s1910
+z1
+t2(DRILL 1 4)
+x0z1
+s1800
+(PECK DRILL)
+z.05
+g83z-.75k.1f.002r.05c.02l300
+g00z1
+t3(BORING BAR 1 4 MIN BORE)
+x.15z1
+s2000
+z.05
+g75i.01u.004f.002p3
+s2500
+g00x.5
+g42
+g95f.001z0d3
+g03x.4375z-.0312r.0312
+z-.45
+x.3125c.01
+z-.7
+x.25
+x.202
+g00z.05
+g40
+z1
+t6(TAP 1 4 20)
+x0z1
+s400
+z.1
+g95f.0475z-.3
+m04
+g04f.5
+g95f.0475z.1
+m03
+g00z1
+t4(DIE HEAD 1 2 20)
+x0z1
+s300
+(RESET DIE HEAD)
+z.1
+g95f.05z-.35p
+g04f.2
+g00z.1
+z1
+m05
+m01
+t7(STRADDLE KNURL 80 TPI)
+x1.05z1
+m03s600
+(KNURL)
+z-.45
+g95f.002x.735
+g04f.3
+g95f.002x1.05
+g00z1
+(WAIT FOR PARTS CATCHER)
+m91
+m32
+g00
+t8(CUTOFF 062)
+x1.1z1
+m03s1500
+z-.662
+g95f.0015x-.01
+g00x1.1
+m05
+z1
+m09
+m05
+m30
+}2
+x.25z0
+x.75c.02
+z-.4
+x.95c.015
+z-.6
+x1
+m99
+}3
+x.5z0
+g03x.4375z-.0312r.0312
+z-.45
+x.3125c.01
+z-.7
+x.25
+m99
+}1
+m10
+g04f.5
+m11
+m99

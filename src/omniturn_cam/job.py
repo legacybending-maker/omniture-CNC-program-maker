@@ -18,6 +18,13 @@ from .tools import Setup, Station, ToolLibrary
 
 NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,8}")
 
+# Job file format version, written as [job] format = N. Files without it are
+# format 1. Bump it only when an old omniturn-cam would misread a new file
+# (renamed/removed keys, changed meaning or units of a value); adding an
+# optional key with a safe default doesn't need a bump. When you bump it, keep
+# reading every older format and add a test with an old file in tests/data/jobs/.
+JOB_FORMAT = 1
+
 
 @dataclass
 class Stock:
@@ -92,6 +99,12 @@ def profile_from_dict(name: str, d: dict) -> Profile:
 
 def job_from_dict(data: dict, library: ToolLibrary, base_dir: Path | None = None) -> Job:
     j = data["job"]
+    fmt = j.get("format", 1)
+    if not isinstance(fmt, int) or fmt < 1:
+        raise ValueError(f"job file format {fmt!r} is not valid")
+    if fmt > JOB_FORMAT:
+        raise ValueError(f"this job file is format {fmt}, written by a newer omniturn-cam; this version "
+                         f"reads up to format {JOB_FORMAT}. Update omniturn-cam to open it.")
     setup = Setup()
     for st in data.get("station", []):
         setup.add(Station(int(st["t"]), library[st["tool"]], st.get("d")))
@@ -166,7 +179,7 @@ def op_to_dict(op: Operation) -> dict:
 
 def job_to_dict(job: Job) -> dict:
     return {
-        "job": _clean({"name": job.name, "units": job.units, "description": job.description or None,
+        "job": _clean({"name": job.name, "format": JOB_FORMAT, "units": job.units, "description": job.description or None,
                        "include_subs": job.include_subs}),
         "stock": _clean(dataclasses.asdict(job.stock) | {"material": job.stock.material or None}),
         "station": [_clean({"t": st.t, "tool": st.tool.id, "d": st.d})
