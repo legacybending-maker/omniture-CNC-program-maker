@@ -135,7 +135,9 @@ def test_f_keys_are_stable(win):
 def test_every_operation_form_builds(win):
     """Each operation's fill-in-the-blank form builds, and every field gets a
     proper label rather than its Python name."""
-    from omniturn_cam.fields import new_operation
+    from PySide6.QtWidgets import QFormLayout
+
+    from omniturn_cam.fields import form_fields, new_operation
     from omniturn_cam.gui.forms import OperationForm
     from omniturn_cam.operations import SPECS
 
@@ -143,4 +145,16 @@ def test_every_operation_form_builds(win):
     for kind in SPECS:
         op = new_operation(kind, 1)
         form = OperationForm(op, win.job)
+        expected = dict(form_fields(op))
+        assert set(form.widgets) == set(expected), f"{kind}: form fields differ from the operation's fields"
+        for name, widget in form.widgets.items():
+            layout = widget.parentWidget().layout()
+            assert isinstance(layout, QFormLayout), f"{kind}.{name}: not in a form section"
+            label = layout.labelForField(widget)
+            assert label is not None, f"{kind}.{name}: no label on the form"
+            text = label.text()
+            # fields.info() falls back to the Python name when nothing labels a field.
+            assert text != name, f"{kind}.{name}: the form shows the Python name"
+            assert text == expected[name].label
+            assert widget.toolTip() == expected[name].help and expected[name].help.strip()
         form.deleteLater()

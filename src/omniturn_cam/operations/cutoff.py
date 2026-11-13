@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 
 @dataclass(kw_only=True)
 class Cutoff(RadialPass):
+    """Part off: a radial pass to just past centre, optionally stopping the
+    spindle once the part is off."""
+
     x_start: float | None = None  # default: stock diameter + clearance
     x_end: float = -0.010  # just past centre
     stop_spindle_after: bool = False
