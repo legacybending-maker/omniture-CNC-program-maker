@@ -21,6 +21,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions:
   PR and issue templates, release workflow.
 - Example tool library: a 1/4 min-bore boring bar.
 
+### Changed
+- Each operation type is one file in `operations/` (dataclass, labels, menu
+  entry, tool defaults and OmniTurn code together), and each programming
+  screen is one file in `gui/screens/`. Adding an operation is adding a file.
+  No change to what the operator sees or to any program.
+- New tests keep it that way: every field must have an operator label and
+  help text, the add-process menu order and the F-key order are pinned, and
+  every relative import (including ones inside functions) must resolve.
+
 ### Fixed
 - numpy (needed for STL/3MF import) is now a declared dependency.
 - Version numbers agree everywhere (0.2.0); `package.xml` already said 0.2.0.
