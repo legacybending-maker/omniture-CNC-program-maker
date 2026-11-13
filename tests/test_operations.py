@@ -80,8 +80,13 @@ def test_every_field_has_an_operator_label(kind):
 
 @pytest.mark.parametrize("kind", list(SPECS))
 def test_optional_fields_say_what_blank_means(kind):
-    """Blank means automatic, and the help text says what automatic will do."""
+    """Blank means automatic, and the help text says what automatic will do
+    (CONTRIBUTING.md, Usability): "Blank = ..." in the help, and a placeholder."""
+    vague = []
     for f in dataclasses.fields(SPECS[kind].cls):
         fi = info(kind, f.name)
         if fi.optional:
             assert fi.blank.strip(), f"{kind}.{f.name}: optional field needs a placeholder for blank"
+            if "blank" not in fi.help.lower():
+                vague.append(f.name)
+    assert not vague, f"{kind}: say in the help what leaving these blank does: {vague}"

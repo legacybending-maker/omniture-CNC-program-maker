@@ -82,7 +82,7 @@ class ProcessScreen(Screen):
             item.setText(f"{row + 1:>2}.  {summary(self.job.operations[row], self.job.units)}")
 
     def _add(self, kind):
-        from ...ops import OPERATION_TYPES
+        from ...operations import OPERATION_TYPES
 
         stations = sorted(self.job.setup.stations.values(), key=lambda s: s.t)
         if not OPERATION_TYPES[kind].uses_tool:

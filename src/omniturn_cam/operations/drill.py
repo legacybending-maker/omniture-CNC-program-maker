@@ -31,7 +31,13 @@ FIELDS = {
     "peck": FieldInfo(
         "Peck depth (K)", "len", "Blank = straight G81 drill. Set for G83 peck", optional=True, blank="no peck"
     ),
-    "retract_z": FieldInfo("Peck retract Z (R)", "z", "Where the drill rapids out to clear chips", optional=True),
+    "retract_z": FieldInfo(
+        "Peck retract Z (R)",
+        "z",
+        "Where the drill rapids out to clear chips. Blank = the start Z",
+        optional=True,
+        blank="start Z",
+    ),
     "peck_clearance": FieldInfo("Peck return gap (C)", "len", "Stops this far short of the last depth on re-entry"),
     "peck_rapid": FieldInfo("Peck retract feed (L)", "feed_ipm", "Blank = rapid", optional=True),
     "z": FieldInfo("Drill depth Z", "z", "Absolute Z of the drill point at full depth"),
