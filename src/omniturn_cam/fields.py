@@ -29,13 +29,21 @@ FIELDS: dict[str, FieldInfo] = {
         group="Speed",
         optional=True,
     ),
-    "min_rpm": FieldInfo("CSS min RPM", "rpm", "G76 floor for constant surface speed", group="Speed", optional=True),
+    "min_rpm": FieldInfo(
+        "CSS min RPM",
+        "rpm",
+        "G76 floor for constant surface speed. Blank = no G76 line",
+        group="Speed",
+        optional=True,
+        blank="none",
+    ),
     "max_rpm": FieldInfo(
         "CSS max RPM",
         "rpm",
-        "G77 ceiling for constant surface speed (default: machine max)",
+        "G77 ceiling for constant surface speed. Blank = the machine's max rpm (machine.toml)",
         group="Speed",
         optional=True,
+        blank="machine max",
     ),
     "spindle": FieldInfo(
         "Spindle direction",

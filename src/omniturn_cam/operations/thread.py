@@ -69,7 +69,7 @@ FIELDS = {
     "taper_a": FieldInfo(
         "Taper (A)",
         "len",
-        "X travel over the whole Z travel including run-up. Needs a start X",
+        "X travel over the whole Z travel including run-up. Needs a start X. Blank = straight thread, no A word",
         optional=True,
         blank="none",
     ),

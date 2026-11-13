@@ -29,6 +29,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions:
 - New tests keep it that way: every field must have an operator label and
   help text, the add-process menu order and the F-key order are pinned, and
   every relative import (including ones inside functions) must resolve.
+- Help text for fields you can leave blank now says what blank does: CSS min
+  RPM (no G76 line), CSS max RPM (the machine's max), peck retract Z (the start
+  Z), thread taper (straight thread). Placeholders match. No change to any
+  program.
 
 ### Fixed
 - numpy (needed for STL/3MF import) is now a declared dependency.
