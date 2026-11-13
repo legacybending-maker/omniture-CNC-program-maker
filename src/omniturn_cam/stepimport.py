@@ -31,7 +31,7 @@ from .geometry import Arc, Line, Point, Profile
 from .kernels import Kernel, SolidInfo
 
 __all__ = ["StepImportError", "SolidInfo", "Axis", "ImportResult", "read_solids", "find_axis",
-           "import_step", "import_solid", "extend_to_stock"]
+           "import_step", "import_solid", "finish_loop", "extend_to_stock"]
 
 MM_PER_INCH = 25.4
 TOL = 1e-4          # mm, for joining edge ends
@@ -373,13 +373,13 @@ class ImportResult:
 
 def _to_profile(chain: list[Seg], name: str, side: str, scale: float, decimals: int) -> Profile:
     def P(p):
-        return Point(round(2 * p[1] * scale, decimals) + 0.0, round(p[0] * scale, decimals) + 0.0)
+        return Point(float(round(2 * p[1] * scale, decimals)) + 0.0, float(round(p[0] * scale, decimals)) + 0.0)
 
     prof = Profile(P(chain[0].p0), name=name, side=side)
     for s in chain:
         end = P(s.p1)
         if s.kind == "arc":
-            prof.segments.append(Arc(end, round(s.radius * scale, decimals), s.direction))
+            prof.segments.append(Arc(end, float(round(s.radius * scale, decimals)), s.direction))
         else:
             prof.segments.append(Line(end))
     return prof
@@ -432,6 +432,15 @@ def import_solid(solid, units: str = "inch", flip: bool = False,
         warnings.append("part has features that are not turned (" + "; ".join(odd)
                         + "). The profile is taken where the part is fullest - machine those features separately")
 
+    return finish_loop(loop, flip, units, warnings, name, angle, axis=axis, radial=_frame(axis, angle)[0])
+
+
+def finish_loop(loop: list[Seg], flip: bool, units: str, warnings: list[str], name: str,
+                angle: float, tol: float = TOL * 5, axis: Axis | None = None,
+                radial: tuple = (1.0, 0.0, 0.0)) -> ImportResult:
+    """Shared by STEP and mesh import: put Z0 at the face, split into OD/ID, convert units.
+    axis/radial say where the cut lies in the model (STEP import), so a CAD front end
+    can draw the profile on the part; mesh import leaves them out."""
     zs = [p[0] for s in loop for p in s.points()]
     zmin, zmax = min(zs), max(zs)
     if flip:
@@ -445,7 +454,7 @@ def import_solid(solid, units: str = "inch", flip: bool = False,
     zmin, zmax = zmin - zmax, 0.0
     length = zmax - zmin
 
-    od_chain, id_chain = _split(loop, zmin)
+    od_chain, id_chain = _split(loop, zmin, tol)
     if any(s.approx for s in od_chain + id_chain):
         warnings.append("part of the outline isn't made of lines and arcs; it was approximated with "
                         "short lines - check the shape on F2")
@@ -459,8 +468,8 @@ def import_solid(solid, units: str = "inch", flip: bool = False,
                             "(a groove or slot cut from the back) - it can't be reached from the face; "
                             "edit the shape on F2 or machine that feature from the other end")
     rmax = max(p[1] for s in loop for p in s.points())
-    return ImportResult(od, idp, round(2 * rmax * scale, dec), round(length * scale, dec), units,
-                        warnings, name, angle, axis, _frame(axis, angle)[0], z_face, flip)
+    return ImportResult(od, idp, float(round(2 * rmax * scale, dec)), float(round(length * scale, dec)), units,
+                        warnings, name, angle, axis, radial, z_face, flip)
 
 
 def extend_to_stock(prof: Profile, stock_dia: float) -> Profile:
@@ -471,10 +480,10 @@ def extend_to_stock(prof: Profile, stock_dia: float) -> Profile:
     return prof
 
 
-def _split(loop: list[Seg], zmin: float) -> tuple[list[Seg], list[Seg]]:
+def _split(loop: list[Seg], zmin: float, tol: float = TOL * 5) -> tuple[list[Seg], list[Seg]]:
     """Split the half-section at the face into the OD path and the ID path."""
-    near = lambda a, b: abs(a - b) < TOL * 5
-    closed = math.dist(loop[0].p0, loop[-1].p1) < TOL * 5
+    near = lambda a, b: abs(a - b) < tol
+    closed = math.dist(loop[0].p0, loop[-1].p1) < tol
     # vertices: start of each segment (+ end of the last for an open chain)
     verts = [s.p0 for s in loop] + ([] if closed else [loop[-1].p1])
     face_idx = [i for i, p in enumerate(verts) if near(p[0], 0.0)]
@@ -501,7 +510,7 @@ def _split(loop: list[Seg], zmin: float) -> tuple[list[Seg], list[Seg]]:
                 out.append(s)
                 end = s.p1
                 i -= 1
-            if near(end[0], zmin) or end[1] < TOL * 5 or len(out) > n:
+            if near(end[0], zmin) or end[1] < tol or len(out) > n:
                 break
         return out
 
@@ -515,6 +524,6 @@ def _split(loop: list[Seg], zmin: float) -> tuple[list[Seg], list[Seg]]:
     else:
         od, idp = bwd, fwd
     # an ID path that runs straight back to the axis at the face is no bore at all
-    if idp and all(p[1] < TOL * 5 for p in (idp[-1].p1,)) and verts[start][1] < TOL * 5:
+    if idp and all(p[1] < tol for p in (idp[-1].p1,)) and verts[start][1] < tol:
         idp = []
     return od, idp

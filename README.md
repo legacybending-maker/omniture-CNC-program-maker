@@ -38,6 +38,7 @@ converts them to the OmniTurn's G02/G03, whose X axis points down.
 | 2 | Fill-in-the-blank GUI (Okuma IGF style), tool library editor | **working** |
 | 2b | Drawing STEP/DXF tool models in the backplot | planned |
 | 3 | STEP import: find the turning axis, cut the half-section, build OD and ID shapes | **working** |
+| 3b | STL / 3MF mesh import (e.g. 3D-print files), fitted back to lines and arcs | **working** |
 | 4 | G33 threading (single/multi-start, angle infeed, pull-out, spring passes) | **working** |
 | 5 | Collision checks against tool models, travel limits | planned |
 | 6 | FreeCAD workbench: profile extraction + save to job **working**; programming screens inside FreeCAD | started |
@@ -81,9 +82,14 @@ spindle-synced axial pass at .05 IPR.
 Your tool library lives in `~/.config/omniturn-cam/tools.toml`. A starter
 library is copied there the first time the program runs.
 
-## Importing a STEP file
+## Importing a STEP, STL or 3MF file
 
-On **F2 Part Shape**, press **Import from STEP…** and pick the file.
+On **F2 Part Shape**, press **Import from model…** and pick the file.
+
+STEP gives exact geometry. STL and 3MF (meshes, e.g. a PrusaSlicer project) also work: the
+turning axis is found from the triangles and the outline is fitted back to lines and arcs,
+typically within .002". Check mesh-imported sizes against the print. SolidWorks `.SLDPRT`
+files can't be read outside SolidWorks: save them as STEP (AP214) first.
 
 1. If the file has several solids (an assembly), choose one. You can also
    break a single part out of an assembly in FreeCAD and export just that
