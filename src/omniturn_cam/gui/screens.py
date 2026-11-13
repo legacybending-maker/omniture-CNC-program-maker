@@ -214,8 +214,8 @@ class ShapeScreen(Screen):
         self.sz.valueChanged.connect(lambda _v: self._rebuild())
         top.addWidget(self.sz)
         top.addStretch(1)
-        b = QPushButton("Import from STEP…")
-        b.setToolTip("Pick a STEP file of a turned part; its OD and bore become shapes")
+        b = QPushButton("Import from model…")
+        b.setToolTip("Pick a STEP, STL or 3MF file of a turned part; its OD and bore become shapes")
         b.clicked.connect(self._import_step)
         top.addWidget(b)
         lay.addLayout(top)
@@ -368,7 +368,9 @@ class ShapeScreen(Screen):
 
     def _import_step(self):
         start = self.win.settings.value("step_dir", str(Path.home()))
-        path, _ = QFileDialog.getOpenFileName(self, "Import from STEP", start, "STEP files (*.step *.stp *.STEP *.STP)")
+        from ..modelimport import MODEL_FILTER
+        path, _ = QFileDialog.getOpenFileName(self, "Import shape from a 3D model", start,
+                                              MODEL_FILTER + ";;All files (*)")
         if not path:
             return
         self.win.settings.setValue("step_dir", str(Path(path).parent))
@@ -376,7 +378,7 @@ class ShapeScreen(Screen):
             from .stepdialog import StepImportDialog
             dlg = StepImportDialog(path, self.job, self)
         except Exception as e:   # missing OCP, unreadable file
-            QMessageBox.critical(self, "Import from STEP", str(e))
+            QMessageBox.critical(self, "Import shape", str(e))
             return
         if dlg.exec() == QDialog.Accepted and dlg.result is not None:
             names = dlg.apply()

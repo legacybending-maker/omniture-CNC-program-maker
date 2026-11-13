@@ -130,3 +130,35 @@ def blind_hole_dome():
         ("line", (z(-0.5), r(0.25))),
         ("line", (z(0), r(0.25))),
     ])
+
+
+def write_stl(path, shape, ascii=False, deflection=0.002):
+    """Tessellate like a CAD STL export (fine) and write it."""
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.StlAPI import StlAPI_Writer
+    BRepMesh_IncrementalMesh(shape, deflection, False, 0.05, True)
+    w = StlAPI_Writer()
+    w.ASCIIMode = ascii
+    w.Write(shape, str(path))
+    return path
+
+
+def write_3mf(path, shape, offset=(150.0, 120.0, 0.0), deflection=0.002):
+    """A minimal 3MF like a slicer saves: mesh in an object, placed by an item transform."""
+    import zipfile
+    import numpy as np
+    from omniturn_cam.meshimport import read_stl
+    tmp = str(path) + ".stl"
+    write_stl(tmp, shape, deflection=deflection)
+    body = read_stl(tmp)[0]
+    v = body.vertices - np.array(offset)
+    verts = "".join(f'<vertex x="{x:.6f}" y="{y:.6f}" z="{z:.6f}"/>' for x, y, z in v)
+    tris = "".join(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in body.triangles)
+    model = ('<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" '
+             'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources>'
+             f'<object id="1" type="model"><mesh><vertices>{verts}</vertices><triangles>{tris}</triangles>'
+             '</mesh></object></resources><build><item objectid="1" transform="1 0 0 0 1 0 0 0 1 '
+             f'{offset[0]} {offset[1]} {offset[2]}"/></build></model>')
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("3D/3dmodel.model", model)
+    return path

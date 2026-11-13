@@ -14,12 +14,13 @@ from .widgets import PlotCanvas, fmt_num
 class StepImportDialog(QDialog):
     def __init__(self, path: str, job, parent=None):
         super().__init__(parent)
-        from ..stepimport import read_solids
-        self.setWindowTitle(f"Import from STEP - {Path(path).name}")
+        from ..modelimport import is_mesh, list_bodies
+        self.setWindowTitle(f"Import shape - {Path(path).name}")
         self.resize(1000, 640)
         self.path, self.job = path, job
         self.result = None
-        self.solids = read_solids(path)
+        self.solids = list_bodies(path)
+        self.mesh = is_mesh(path)
 
         lay = QHBoxLayout(self)
         left = QVBoxLayout()
@@ -29,7 +30,7 @@ class StepImportDialog(QDialog):
             dims = " x ".join(f"{v:.1f}" for v in s.size)
             self.solid.addItem(f"{s.name}   {dims} mm", s.index)
         self.solid.setEnabled(len(self.solids) > 1)
-        form.addRow("Solid", self.solid)
+        form.addRow("Object" if self.mesh else "Solid", self.solid)
         flip_row = QHBoxLayout()
         self.flip = QCheckBox("Z0 at the other end")
         flip_btn = QPushButton("Flip ⇄")
@@ -70,10 +71,11 @@ class StepImportDialog(QDialog):
         self._run()
 
     def _run(self):
-        from ..stepimport import StepImportError, import_step
+        from ..modelimport import import_model
+        from ..stepimport import StepImportError
         self.notes.clear()
         try:
-            self.result = import_step(self.path, self.solid.currentData(), self.job.units, self.flip.isChecked())
+            self.result = import_model(self.path, self.solid.currentData(), self.job.units, self.flip.isChecked())
         except StepImportError as e:
             self.result = None
             self.canvas.message(str(e))
