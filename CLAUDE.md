@@ -39,6 +39,16 @@ the machine or hurt someone, so correctness beats speed every time.
 - Keep the core free of Qt and CAD-kernel imports (`tests/test_layering.py`).
 - Job file changes follow the compatibility rules (`JOB_FORMAT` in `job.py`).
 
+## Teaching comments
+
+Jeff and William maintain this code and are learning programming through it.
+Follow "Teaching comments" in CONTRIBUTING.md for every line you write or
+change: explain *why* it's written this way, name the best practice it
+follows and what goes wrong without it, and explain Python features a
+beginner wouldn't know. Don't narrate the obvious. End every PR description
+with a **What to learn from this** section. When the user asks why you did
+something, answer as a teacher: the reasoning, the alternatives, the trade-off.
+
 ## Useful facts
 
 - Install for development: `pip install -e ".[all,dev]"` (the FreeCAD suite
