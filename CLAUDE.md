@@ -20,8 +20,10 @@ the machine or hurt someone, so correctness beats speed every time.
 - Before opening the PR: `git fetch origin && git rebase origin/main`, then
   `ruff format . && ruff check . && QT_QPA_PLATFORM=offscreen python -m pytest`.
   All green, or the PR isn't ready.
-- Open the PR with the template filled in and `Closes #N`. Wait for CI. Don't
-  merge your own PR: the user merges after an independent review.
+- Open the PR with the template filled in and `Closes #N`. Wait for CI. Never
+  merge a PR, yours or anyone's: Jeff (`legacybending-maker`, the repo and
+  machine owner) merges every PR after an independent review. More than one
+  person works on this repo; only work on the issue you were given.
 - If asked to **review** a PR, use the review checklist in CONTRIBUTING.md,
   read the full diff (including `tests/golden/expected/`), run the tests
   yourself, and report problems with file and line. A review that only says
@@ -32,7 +34,8 @@ the machine or hurt someone, so correctness beats speed every time.
 - Don't update `tests/golden/expected/` unless the output change is the point
   of the issue. If you do, list every changed line in the PR and why.
 - Don't edit `tests/golden/verified.toml` except to remove an entry whose
-  output your PR intentionally changes (and say so). Only the user adds entries.
+  output your PR intentionally changes (and say so). Only Jeff adds entries,
+  after running the program on the machine.
 - Don't weaken, skip or delete tests to get a green run.
 - Don't turn a `PostError` into a warning, or a warning into nothing.
 - Every dialect rule cites a page of the OmniTurn manual in
@@ -58,6 +61,10 @@ something, answer as a teacher: the reasoning, the alternatives, the trade-off.
 - Regenerate golden output (only when intended):
   `UPDATE_GOLDEN=1 python -m pytest tests/test_golden.py`.
 - Rebuild STEP fixtures: `python tests/stepparts.py`.
-- The OmniTurn manuals are not in the repo. In the claude.ai project they are
-  attached as `OmniTurn_Manual_g4.pdf`, `OmniTurn-G4-Diagnostics.pdf` and
-  `using_external_subroutines.pdf`.
+- FreeCAD workbench design decisions and test findings:
+  `docs/freecad-workbench.md`.
+- The OmniTurn manuals are not in the repo (copyright). Each contributor
+  attaches them to their own claude.ai project: `OmniTurn_Manual_g4.pdf`,
+  `OmniTurn-G4-Diagnostics.pdf` and `using_external_subroutines.pdf`. If you
+  need a manual page and can't see the manuals, say so and mark the rule
+  **VERIFY**; don't work from memory.
