@@ -34,7 +34,10 @@ Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first.
 6. **Independent review before merge.** Someone (or a fresh Claude session)
    who did not write the change reviews it against the checklist below. The
    author doesn't review their own work.
-7. **Merge with "Create a merge commit".** (Squash and rebase merges are
+7. **Jeff merges every PR.** Jeff (`legacybending-maker`) owns the repo and
+   the machine. Contributors and their Claude sessions open PRs and review
+   them, but don't merge, even when CI is green and a review is done.
+   Merges use "Create a merge commit". (Squash and rebase merges are
    turned off so commit history and `.git-blame-ignore-revs` stay valid.)
    The branch is deleted automatically.
 8. **Releases** are cut from `main` now and then (see
@@ -56,7 +59,7 @@ This is the part that matters most.
 - Programs that have been run on the machine are listed in
   `tests/golden/verified.toml`. Changing one fails a separate test until you
   remove its entry in the same PR and say so. It has to be proved out again
-  before it goes back in. Only the machine owner adds entries.
+  before it goes back in. Only the machine owner (Jeff) adds entries.
 - New dialect rules go in `docs/omniturn-post-rules.md` with a page
   reference. Anything you couldn't confirm in the manual is marked **VERIFY**.
 
