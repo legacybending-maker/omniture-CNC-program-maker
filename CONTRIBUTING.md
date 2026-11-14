@@ -18,6 +18,14 @@ Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first.
 3. **Small pull requests.** One issue per PR, one area per PR. If you find
    another problem on the way, open an issue for it instead of fixing it in
    the same PR.
+
+   **Docs exception.** A docs-only change (Markdown files, PR/issue
+   templates; no code, no tests, nothing under `tests/golden/`) may be added
+   to an open docs-only PR instead of getting its own, as long as that PR
+   hasn't been reviewed yet. Update the PR's title and description to cover
+   everything in it. Anything that touches code or tests always gets its own
+   issue and PR. The exception exists because docs can't move the machine,
+   so the paperwork of separate PRs costs more than it protects.
 4. **Before opening the PR**, bring the branch up to date and run everything:
 
    ```bash
@@ -106,7 +114,44 @@ The operator is a machinist at the machine, not a programmer.
   the machine: cite the page.
 - Keep the core free of GUI and CAD-kernel imports (`tests/test_layering.py`).
 
+## Teaching comments
+
+The people maintaining this code are learning to program as they go, so code
+written here should teach. Comment new and changed code heavily, aimed at
+someone who knows the machine well and Python less well:
+
+- **Why this way.** Say why the code is shaped like this and what the
+  obvious alternative was. Example: "A dataclass rather than a dict, so a
+  misspelled field name is an error instead of a silent new key."
+- **The practice behind it.** When the code follows a convention or best
+  practice (raise instead of returning None, keep I/O out of the core,
+  dependency injection for testing, a context manager to close files...),
+  name it and say in a sentence what goes wrong without it.
+- **Python features a beginner wouldn't know.** Briefly explain
+  comprehensions, generators, `*args`/`**kwargs`, decorators, `@property`,
+  type hints like `X | None`, f-string format specs, `pathlib` and so on the
+  first time they appear in a file.
+- **Tests too.** Each test says what it protects against and why that
+  matters at the machine.
+- **Docstrings** on every function and class: what it does, its arguments and
+  return value, and what it raises.
+
+Don't narrate the obvious (`i += 1  # add one to i`). The comment should say
+what the line can't. Keep comments true: when you change code, fix its
+comments in the same commit. Comment the code your change touches; don't
+re-comment untouched files in an unrelated PR (open an issue instead).
+
+Every PR description ends with a short **What to learn from this** section:
+the two or three ideas in the change worth understanding, in plain language.
+
 ## Review checklist
+
+**Who reviews.** Jeff and William review each other's PRs, including PRs
+their Claude sessions wrote. Reading code you didn't write closely enough to
+question it is one of the fastest ways to learn, and it keeps the review
+independent. A fresh Claude session can do an extra pass with this checklist,
+but a human reviewer is the default. A PR with G-code output changes always
+needs a human review.
 
 The reviewer checks, and notes in the review:
 
@@ -122,5 +167,8 @@ The reviewer checks, and notes in the review:
 - [ ] Job/tool/machine files: old files still load.
 - [ ] Layering rules hold; no new dependency without a reason in the PR.
 - [ ] Messages and labels are clear to an operator.
+- [ ] New and changed code has teaching comments (why, the practice behind
+      it, beginner-unfamiliar Python explained) and they match the code; the
+      PR has a **What to learn from this** section.
 - [ ] Docs updated (`ARCHITECTURE.md`, post rules, README) if behaviour or
       structure changed.

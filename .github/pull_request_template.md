@@ -33,9 +33,14 @@ Closes #
 - [ ] `QT_QPA_PLATFORM=offscreen python -m pytest` passes locally
 - [ ] New behaviour has tests; a bug fix has a test that failed before the fix
 - [ ] Inch and metric both handled
+- [ ] New and changed code has teaching comments (CONTRIBUTING.md)
 - [ ] Old job / tool / machine files still load
 - [ ] `CHANGELOG.md` updated under **Unreleased**
 - [ ] Docs updated if behaviour or structure changed (`docs/ARCHITECTURE.md`, `docs/omniturn-post-rules.md`, README)
+
+## What to learn from this
+
+<!-- Two or three ideas in this change worth understanding, in plain language. -->
 
 ## Review
 
