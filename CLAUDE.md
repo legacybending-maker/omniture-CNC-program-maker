@@ -12,7 +12,9 @@ the machine or hurt someone, so correctness beats speed every time.
 - **One session = one issue = one area of the code.** Several sessions run in
   parallel on different issues; stay inside yours. If you find something else
   that needs doing, open a new issue for it (or tell the user) instead of
-  fixing it here.
+  fixing it here. The one exception is the docs exception in
+  CONTRIBUTING.md (step 3): docs-only changes may go into an open, unreviewed
+  docs-only PR. Code and tests never do.
 - Branch from the latest `origin/main` as `claude/<issue#>-<topic>`. Never
   commit or push to `main`.
 - Before opening the PR: `git fetch origin && git rebase origin/main`, then
