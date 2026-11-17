@@ -59,7 +59,7 @@ def emit(p: OmniTurnPost, op: Rough) -> None:
     else:
         p.emit(f"g78u{p.n(op.u)}f{p.f(op.feed)}p{sub}")
     # The cycle returns the tool to its start point.
-    p.x, p.z, p.motion = sx, sz, None
+    p.cycle_ended_at(sx, sz)
     p.css_off(op)
 
 

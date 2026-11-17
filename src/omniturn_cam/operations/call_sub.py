@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from .base import FieldInfo, Operation, OpSpec
 
@@ -18,6 +18,9 @@ class CallSub(Operation):
 
     t: int | None = None
     sub: int = 1
+    # Operator's declaration of where the slide is when the subroutine returns
+    # (ENDS_AT in base.py). Default "check" assumes nothing.
+    ends_at: Literal["check", "tool_change_z"] = "check"
     label = "call sub"
     uses_tool = False
 
@@ -29,11 +32,21 @@ FIELDS = {
 
 
 def emit(p: OmniTurnPost, op: CallSub) -> None:
-    p.leave_known_state()
+    """M98 between a park and a resume.
+
+    What the post forgets afterwards comes from reading the subroutine itself
+    when it's in the job's include file. A subroutine the post can't read
+    (pasted on the control, say) could do anything, so then it forgets
+    everything, including where the slide is, unless the operator declared it.
+    The call is read exactly as if it were the raw line ``m98pN``, so the two
+    operations can't drift apart.
+    """
+    p.park_before_handoff()
     if op.comment:
         p.comment(op.comment)
-    p.emit(f"m98p{op.sub}")
-    p.forget_state()
+    call = f"m98p{op.sub}"
+    p.emit(call)
+    p.resume_after([call], op.ends_at, f"operation {p.op_number} (call sub P{op.sub})")
 
 
 def summary(op: CallSub) -> list[str]:

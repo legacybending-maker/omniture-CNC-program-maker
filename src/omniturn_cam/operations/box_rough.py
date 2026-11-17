@@ -45,7 +45,7 @@ def emit(p: OmniTurnPost, op: BoxRough) -> None:
     p.set_feed(op.feed)
     # U is ignored by G74 but the control still requires the word.
     p.emit(f"g74x{p.n(op.x)}z{p.n(op.z)}i{p.n(op.depth)}u{p.n(op.u)}f{p.f(op.feed)}")
-    p.x, p.z, p.motion = sx, sz, None
+    p.cycle_ended_at(sx, sz)  # G74 returns to its start point (p2.39)
     p.css_off(op)
 
 

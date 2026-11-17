@@ -11,7 +11,7 @@ from __future__ import annotations
 import dataclasses
 
 from .operations import OPERATION_TYPES, SPECS, Operation, kind_of
-from .operations.base import FieldInfo
+from .operations.base import ENDS_AT, FieldInfo
 
 FIELDS: dict[str, FieldInfo] = {
     "t": FieldInfo("Tool station", "station", "Which T number on the plate does this cut", group="Tool"),
@@ -76,6 +76,15 @@ FIELDS: dict[str, FieldInfo] = {
     "dwell": FieldInfo("Dwell", "sec", "Seconds at the bottom of the cut (G04, min .1)"),
     "retract": FieldInfo("Retract", "choice", "rapid out, or feed out (box tools, burnishing)", ("rapid", "feed")),
     "retract_feed": FieldInfo("Retract feed", "feed", "Blank = same as the cut", optional=True),
+    # raw code / call sub: see ENDS_AT in operations/base.py
+    "ends_at": FieldInfo(
+        "Slide position afterwards",
+        "choice",
+        "check: the post reads the code (and the subroutine, if it's in the include file); if it can move the "
+        "slide, the post refuses to move it again. tool_change_z: you declare it always finishes with the "
+        "slide back at the tool-change Z, clear of the work; prove that in single block",
+        ENDS_AT,
+    ),
 }
 
 # Built from the operation modules (kept under these names for the GUI and tests).

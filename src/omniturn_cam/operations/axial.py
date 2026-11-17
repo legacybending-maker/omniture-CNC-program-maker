@@ -67,8 +67,7 @@ def emit(p: OmniTurnPost, op: AxialPass) -> None:
     if op.stop_after != "none":
         p.rapid(z=p.m.tool_call_z)
         if op.stop_spindle_for_stop:
-            p.emit("m05")
-            p.spindle = None  # next cut restarts it
+            p.stop_spindle()  # recorded as M05, so the next cut restarts it
         p.emit(op.stop_after)
 
 

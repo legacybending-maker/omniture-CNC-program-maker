@@ -8,7 +8,7 @@ from omniturn_cam.backplot import interpret
 from omniturn_cam.geometry import Arc, Point, Profile
 from omniturn_cam.job import Job, Stock, load_job
 from omniturn_cam.lint import lint
-from omniturn_cam.ops import AxialPass, Drill, Finish, Rough
+from omniturn_cam.ops import AxialPass, Drill, Face, Finish, Rough
 from omniturn_cam.post import MachineConfig, OmniTurnPost, PostError, post
 from omniturn_cam.post.omniturn import fmt, sanitize_comment
 from omniturn_cam.tools import Setup, Station, Tool, ToolLibrary
@@ -353,3 +353,335 @@ def test_rough_warns_on_shape_that_turns_back_toward_face(lib):
     warns = []
     post(make_job(lib, {"od": prof}, [Rough(t=1, rpm=2000, profile="od", start_x=0.75, start_z=0.05)]), warnings=warns)
     assert any("turns back" in w for w in warns)
+
+
+# --------------------------------------------------------------------- machine state across raw code and M98 (#27)
+# The post hands control to code it didn't write in two operations: raw program
+# lines and M98 subroutine calls. These tests pin the contract in
+# docs/omniturn-post-rules.md ("Handing control to code the post didn't write"):
+# afterwards every mode an operation needs is either known or written again, and
+# the slide is never moved from a position the post can't vouch for.
+#
+# Most of them check the program the way the control reads it, not the post's
+# internal state: _modes() replays the modal G and M words of the program up to
+# a line, so "the drill ran in G95" is checked against the actual output.
+import re  # noqa: E402
+
+from omniturn_cam.post.external import EVERYTHING, analyse, subroutine_bodies  # noqa: E402
+from omniturn_cam.post.state import POSITION, UNKNOWN, MachineState  # noqa: E402
+
+MODAL_GROUPS = {
+    "coords": {"g90", "g91"},
+    "diameter": {"g72", "g73"},
+    "units": {"g70", "g71"},
+    "feed_mode": {"g94", "g95"},
+    "spindle_mode": {"g96", "g97"},
+    "comp": {"g40", "g41", "g42"},
+    "spindle": {"m03", "m04", "m05"},
+    "coolant": {"m08", "m09"},
+}
+
+
+def _main(code: str) -> list[str]:
+    """The main program's lines (everything before M30; subroutines follow it)."""
+    lines = code.splitlines()
+    return lines[: lines.index("m30")]
+
+
+def _modes(lines: list[str]) -> dict[str, str | None]:
+    """The last word from each modal group in ``lines``: the mode the control is
+    in after running them. None = never set in these lines."""
+    seen: dict[str, str | None] = dict.fromkeys(MODAL_GROUPS)
+    for line in lines:
+        for word in re.findall(r"[gm]\d\d", re.sub(r"\([^)]*\)", "", line)):
+            for group, words in MODAL_GROUPS.items():
+                if word in words:
+                    seen[group] = word
+    return seen
+
+
+def _at(lines: list[str], start: str, after: int = 0) -> int:
+    """Index of the first line starting with ``start`` at or after index ``after``."""
+    return next(i for i, line in enumerate(lines) if i >= after and line.startswith(start))
+
+
+def _hjob(lib, *ops, units="inch", include=None):
+    """A job with a turning tool (t1, D1), a drill (t2) and a cutoff blade (t8)."""
+    setup = Setup()
+    setup.add(Station(1, lib["lh-turn-35"], d=1))
+    setup.add(Station(2, lib["drill-250"]))
+    setup.add(Station(8, lib["cutoff-062"]))
+    job = Job("TEST", units, Stock(20.0 if units == "metric" else 0.75), setup, {}, list(ops))
+    job.include_subs = include
+    return job
+
+
+def _drill(z, **kw):
+    return Drill(t=2, rpm=2000, z=z, **kw)
+
+
+def _subs(tmp_path, text):
+    path = tmp_path / "subs.txt"
+    path.write_text(text)
+    return str(path)
+
+
+# ---- feed mode (defect A: G94 survived raw code, so a G81 F.003 ran as .003 inches per MINUTE)
+@pytest.mark.parametrize("raw", ["g94f100", "g95", "m91"])
+def test_drill_after_raw_code_runs_in_g95(lib, raw):
+    lines = _main(post(_hjob(lib, _drill(-0.1), RawCode(code=raw), _drill(-0.2))))
+    i = _at(lines, "g81z-.2")
+    assert _modes(lines[:i])["feed_mode"] == "g95"
+
+
+def test_drill_after_raw_code_without_feed_mode_change_adds_nothing(lib):
+    """M91 can't change the feed mode, so the post still knows G95: no redundant line."""
+    lines = _main(post(_hjob(lib, _drill(-0.1), RawCode(code="m91"), _drill(-0.2))))
+    assert "g95" not in lines[_at(lines, "m91") : _at(lines, "g81z-.2")]
+
+
+# ---- coolant (defect B: after a raw M09 the post still believed coolant was on)
+@pytest.mark.parametrize(
+    "raw, coolant_after, want",
+    [("m09", True, "m08"), ("m08", True, "m08"), ("m09", False, "m09")],
+)
+def test_coolant_is_what_the_next_operation_asks_for(lib, raw, coolant_after, want):
+    lines = _main(post(_hjob(lib, _drill(-0.1), RawCode(code=raw), _drill(-0.2, coolant=coolant_after))))
+    i = _at(lines, "g81z-.2")
+    assert _modes(lines[:i])["coolant"] == want
+    # and it's written after the raw code, not just left over from before it
+    assert want in lines[_at(lines, raw) + 1 : i]
+
+
+def test_coolant_unknown_at_program_start(lib):
+    """The last program may have ended with M02 (coolant still on), so a dry first
+    operation writes M09 rather than assuming coolant is off."""
+    lines = _main(post(_hjob(lib, _drill(-0.1, coolant=False))))
+    assert _modes(lines[: _at(lines, "g81")])["coolant"] == "m09"
+
+
+# ---- spindle
+@pytest.mark.parametrize("raw", ["m04", "m05", "g96s300"])
+def test_spindle_direction_speed_and_mode_restored_after_raw_code(lib, raw):
+    lines = _main(post(_hjob(lib, _drill(-0.1), RawCode(code=raw), _drill(-0.2))))
+    i = _at(lines, "g81z-.2")
+    modes = _modes(lines[:i])
+    assert modes["spindle"] == "m03" and modes["spindle_mode"] == "g97"
+    after_raw = lines[_at(lines, raw) + 1 : i]
+    # The S word comes after the G97: in G96 "s2000" would be 2000 surface feet a minute.
+    assert any(line.endswith("s2000") for line in after_raw)
+    if raw.startswith("g96"):
+        assert after_raw.index("g97") < next(n for n, line in enumerate(after_raw) if line.endswith("s2000"))
+
+
+def test_css_operation_starts_from_a_known_g97_after_raw_g96(lib):
+    """A CSS face after raw G96: G97, then the approach rpm, then G96 with its own speed."""
+    face = Face(t=1, sfm=400, max_rpm=3500, z=0.0)
+    lines = _main(post(_hjob(lib, _drill(-0.1), RawCode(code="g96s300"), face)))
+    after = lines[_at(lines, "g96s300") + 1 :]
+    assert (
+        after.index("g97") < next(n for n, line in enumerate(after) if line.startswith("m03s")) < after.index("g96s400")
+    )
+
+
+# ---- modal conditions that give X and Z their meaning
+@pytest.mark.parametrize(
+    "units, raw, group, want",
+    [
+        ("inch", "g91", "coords", "g90"),
+        ("inch", "g73", "diameter", "g72"),
+        ("inch", "g71", "units", "g70"),
+        ("metric", "g70", "units", "g71"),
+        ("inch", "g41", "comp", "g40"),
+        ("inch", "g42", "comp", "g40"),
+    ],
+)
+def test_modes_restored_before_the_next_tool_call(lib, units, raw, group, want):
+    """The line after a tool call must be the X/Z move (p2.9), so G90/G72/units/G40
+    are written before the tool call, never between it and its move."""
+    drill = _drill(-2.5 if units == "metric" else -0.1)
+    lines = _main(post(_hjob(lib, drill, RawCode(code=raw), Face(t=1, rpm=1500, z=0.0), units=units)))
+    t = _at(lines, "t1(", _at(lines, raw))
+    assert _modes(lines[:t])[group] == want
+    assert "x" in lines[t + 1] and "z" in lines[t + 1]
+
+
+def test_every_mode_known_at_the_first_cut_after_unreadable_code(lib):
+    """After a subroutine the post can't read, every mode is written again before cutting."""
+    sub = CallSub(sub=7, ends_at="tool_change_z")
+    lines = _main(post(_hjob(lib, _drill(-0.1), sub, Face(t=1, rpm=1500, z=0.0)), check=False))  # P7: not here
+    cut = _at(lines, "g95f", _at(lines, "m98p7"))
+    after = _modes(lines[_at(lines, "m98p7") + 1 : cut + 1])
+    assert after == {
+        "coords": "g90",
+        "diameter": "g72",
+        "units": "g70",
+        "feed_mode": "g95",
+        "spindle_mode": "g97",
+        "comp": "g40",
+        "spindle": "m03",
+        "coolant": "m08",
+    }
+
+
+def test_nothing_restated_after_code_that_changes_nothing_tracked(lib):
+    """Loader waits and PLC outputs leave G modes alone: no restore lines."""
+    lines = _main(post(_hjob(lib, _drill(-0.1), RawCode(code="m91\nm32"), Face(t=1, rpm=1500, z=0.0))))
+    between = lines[_at(lines, "m32") + 1 : _at(lines, "t1(")]
+    assert between == ["g00"]
+
+
+# ---- position (defect C: a two-axis rapid from wherever a subroutine left the slide)
+def test_unreadable_subroutine_refuses_the_next_move(lib):
+    """The post can't see subroutine 7, so it can't know where the slide is."""
+    job = _hjob(lib, _drill(-0.1), CallSub(sub=7), Face(t=1, rpm=1500, z=0.0))
+    with pytest.raises(
+        PostError,
+        match=r"operation 3 \(face t1\): can't call t1: .* after operation 2 \(call sub P7\): subroutine 7 isn't in",
+    ):
+        post(job, check=False)  # check=False: lint would also stop it (P7 undefined); the post must stop first
+
+
+def test_subroutine_declared_to_end_at_tool_change_z(lib):
+    """Declared: the next tool call goes from there, with no move before it, and the
+    operator is warned that the post relies on the declaration."""
+    job = _hjob(lib, _drill(-0.1), CallSub(sub=7, ends_at="tool_change_z"), Face(t=1, rpm=1500, z=0.0))
+    warns = []
+    lines = _main(post(job, check=False, warnings=warns))
+    between = lines[_at(lines, "m98p7") + 1 : _at(lines, "t1(")]
+    assert not [line for line in between if "x" in line or "z" in line]
+    assert any("call sub P7" in w and "declaration" in w for w in warns)
+
+
+def test_readable_subroutine_that_doesnt_move_needs_no_declaration(lib, tmp_path):
+    inc = _subs(tmp_path, "}1\nm10\ng04f.5\nm11\nm99\n")
+    warns = []
+    code = post(_hjob(lib, _drill(-0.1), CallSub(sub=1), Face(t=1, rpm=1500, z=0.0), include=inc), warnings=warns)
+    assert "m98p1" in code and not warns
+
+
+def test_readable_subroutine_that_moves_is_refused(lib, tmp_path):
+    inc = _subs(tmp_path, "}1\nm13\ng00z-.5\nm12\nz1\nm99\n")
+    job = _hjob(lib, _drill(-0.1), CallSub(sub=1), Face(t=1, rpm=1500, z=0.0), include=inc)
+    with pytest.raises(PostError, match=r"line 'g00z-.5' moves the slide \(in subroutine 1\)"):
+        post(job)
+    job.operations[1].ends_at = "tool_change_z"
+    assert "m98p1" in post(job)
+
+
+def test_subroutine_calling_another_is_read_through(lib, tmp_path):
+    inc = _subs(tmp_path, "}1\nm98p2\nm99\n}2\nx0\nm99\n")
+    job = _hjob(lib, _drill(-0.1), CallSub(sub=1), Face(t=1, rpm=1500, z=0.0), include=inc)
+    with pytest.raises(PostError, match=r"line 'x0' moves the slide \(in subroutine 2\)"):
+        post(job)
+
+
+def test_raw_code_that_moves_x_and_z_is_refused_unless_declared(lib):
+    raw = RawCode(code="g00x.5z.2\nz1")
+    job = _hjob(lib, _drill(-0.1), raw, Face(t=1, rpm=1500, z=0.0))
+    with pytest.raises(PostError, match=r"line 'g00x.5z.2' moves the slide"):
+        post(job)
+    raw.ends_at = "tool_change_z"
+    lines = _main(post(job))
+    t = _at(lines, "t1(", _at(lines, "z1", _at(lines, "g00x.5z.2")))
+    assert "x" in lines[t + 1] and "z" in lines[t + 1]
+
+
+def test_raw_code_that_changes_coordinate_mode_and_moves(lib):
+    """G91 and an incremental move: both the mode and the position are lost."""
+    job = _hjob(lib, _drill(-0.1), RawCode(code="g91\nz-.1"), _drill(-0.2))
+    with pytest.raises(PostError, match="doesn't know where the slide is"):
+        post(job)
+
+
+def test_no_automatic_retract_at_the_end_from_an_unknown_position(lib):
+    """Raw code that moves, last in the job: the footer doesn't move the slide, and says so."""
+    warns = []
+    lines = post(_hjob(lib, _drill(-0.1), RawCode(code="x0z.5")), warnings=warns).splitlines()
+    assert lines[_at(lines, "x0z.5") + 1 :][:3] == ["m09", "m05", "m30"]
+    assert any("ends without returning" in w for w in warns)
+
+
+def test_a_later_declaration_recovers_a_lost_position(lib):
+    """Raw code that moves (undeclared), then a subroutine declared to end at the
+    tool-change Z: the declaration is the last word about where the slide is."""
+    ops = [_drill(-0.1), RawCode(code="x0z.5"), CallSub(sub=7, ends_at="tool_change_z"), _drill(-0.2)]
+    assert "g81z-.2" in post(_hjob(lib, *ops), check=False)
+
+
+def test_unknown_ends_at_value_is_refused(lib):
+    with pytest.raises(PostError, match="tool_change_z"):
+        post(_hjob(lib, RawCode(code="m91", ends_at="safe"), _drill(-0.1)))
+
+
+def test_park_before_handoff_only_from_a_known_position(lib):
+    """Two raw blocks in a row: the second doesn't try to park, because after the
+    first (which moves) the post doesn't know where the slide is."""
+    ops = [_drill(-0.1), RawCode(code="x0z.5"), RawCode(code="m91", ends_at="tool_change_z"), _drill(-0.2)]
+    lines = _main(post(_hjob(lib, *ops)))
+    assert lines[_at(lines, "x0z.5") + 1] == "m91"
+
+
+def test_ends_at_round_trips_and_old_files_default_to_check(lib, tmp_path):
+    from omniturn_cam.job import save_job
+
+    job = load_job(Path(__file__).parent / "golden" / "jobs" / "bushing.toml", lib)
+    assert {op.ends_at for op in job.operations if isinstance(op, CallSub | RawCode)} == {"check"}
+    job.operations[0].ends_at = "tool_change_z"
+    save_job(job, tmp_path / "j.toml")
+    assert load_job(tmp_path / "j.toml", lib).operations[0].ends_at == "tool_change_z"
+
+
+# ---- the state model and the code reader on their own
+def test_unknown_cannot_be_used_as_true_or_false():
+    """`if state.coolant:` was the root of defect B; with UNKNOWN it can't be written by mistake."""
+    with pytest.raises(TypeError):
+        bool(UNKNOWN)
+    with pytest.raises(TypeError):
+        if MachineState().coolant:
+            pass
+
+
+def test_new_state_knows_nothing_and_forget_rejects_typos():
+    s = MachineState()
+    assert len(s.unknown_fields()) == 14 and s.clear is False and not s.position_known
+    s.x, s.z, s.clear = 1.0, 1.0, True
+    s.forget(POSITION)
+    assert s.x is UNKNOWN and s.clear is False
+    with pytest.raises(KeyError):
+        s.forget({"colant"})
+
+
+@pytest.mark.parametrize(
+    "code, forgets, moves",
+    [
+        ("m91\nm32\nm10\nm84", set(), False),  # loader waits / outputs: nothing tracked
+        ("(LOAD)\n/m11", set(), False),  # comments and block skip
+        ("g04f.5", {"feed"}, False),
+        ("g94f100", {"feed_mode", "feed"}, False),
+        ("g96s300", {"spindle_mode", "rpm"}, False),
+        ("m09", {"coolant"}, False),
+        ("m04", {"spindle", "rpm"}, False),
+        ("g91", {"coords"}, False),
+        ("ls3\nm91\nlf", set(), False),  # a loop repeats nothing new
+        ("x1", POSITION, True),
+        ("t3", {"tool"} | POSITION, True),
+        ("g10", EVERYTHING, True),  # not one the post can account for
+        ("m00", EVERYTHING, True),  # operator may jog during a stop
+        ("m98p9", EVERYTHING, True),  # not readable
+        ("}4", EVERYTHING, True),
+        ("x1;", EVERYTHING, True),  # not plain words
+    ],
+)
+def test_external_code_reader(code, forgets, moves):
+    eff = analyse(code.splitlines())
+    assert eff.forget >= forgets and eff.moves_slide == moves
+    if forgets is not EVERYTHING and not moves:
+        assert eff.forget == forgets
+
+
+def test_external_reader_follows_m98_and_stops_on_recursion():
+    subs = subroutine_bodies("}1\nm10\nm98p2\nm99\n}2\ng04f1\nm99\n}3\nm98p3\nm99\n")
+    assert subs == {1: ["m10", "m98p2"], 2: ["g04f1"], 3: ["m98p3"]}
+    assert analyse(["m98p1"], subs).forget == {"feed"}
+    assert analyse(["m98p3"], subs).forget == EVERYTHING
