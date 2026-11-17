@@ -39,9 +39,11 @@ Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first.
    the FreeCAD suite. `main` requires all of them and requires the branch to be
    up to date with `main`, so two PRs that each pass alone can't combine into a
    broken `main`.
-6. **Independent review before merge.** Someone (or a fresh Claude session)
-   who did not write the change reviews it against the checklist below. The
-   author doesn't review their own work.
+6. **Independent review before merge.** Jeff and William review each
+   other's PRs against the checklist below (see "Who reviews"). The author
+   doesn't review their own work, and that includes work their Claude
+   sessions wrote. A fresh Claude session can add an extra pass, but a human
+   review is the default and is required for any G-code output change.
 7. **Jeff merges every PR.** Jeff (`legacybending-maker`) owns the repo and
    the machine. Contributors and their Claude sessions open PRs and review
    them, but don't merge, even when CI is green and a review is done.
