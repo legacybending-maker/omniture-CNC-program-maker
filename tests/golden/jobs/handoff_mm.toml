@@ -1,0 +1,81 @@
+# Golden-output job in millimetres: raw lines and M98 between automatic
+# operations (issue #27). Checks that recovery writes G71, not G70.
+#
+#   op 1  M98 to a loader sub the post can read (no motion)
+#   op 3  raw G70 by mistake: G71 must come back before the next tool call
+#   op 5  M98 to a bar-pull sub that moves the slide: declared to end at the
+#         tool-change Z
+#   op 6  CSS face after raw G96: G97 first
+# Not a real part: the point is coverage.
+#
+# Tool library: examples/tools.toml
+
+[job]
+name = "HANDMM"
+units = "metric"
+description = "Golden handoff metric"
+include_subs = "handoff_mm_subs.txt"
+
+[stock]
+diameter = 20.0
+material = "6082"
+
+[[station]]
+t = 1
+tool = "lh-turn-35"
+d = 1
+
+[[station]]
+t = 2
+tool = "drill-250"
+
+[[station]]
+t = 8
+tool = "cutoff-062"
+
+[[op]]
+type = "call_sub"
+sub = 1
+comment = "Load bar"
+
+[[op]]
+type = "drill"
+t = 2
+rpm = 1800
+z = -10.0
+feed = 0.08
+
+[[op]]
+type = "raw"
+code = "g70"
+
+[[op]]
+type = "drill"
+t = 2
+rpm = 1800
+z = -15.0
+feed = 0.08
+
+[[op]]
+type = "call_sub"
+sub = 2
+ends_at = "tool_change_z"
+comment = "Pull bar"
+
+[[op]]
+type = "raw"
+code = "g96s100"
+
+[[op]]
+type = "face"
+t = 1
+sfm = 150
+max_rpm = 3000
+feed = 0.08
+
+[[op]]
+type = "cutoff"
+t = 8
+rpm = 1200
+z = -12.0
+feed = 0.04
