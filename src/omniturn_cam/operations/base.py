@@ -13,6 +13,21 @@ if TYPE_CHECKING:
     from ..tools import Tool
 
 
+# Where the slide is after raw program lines or a called subroutine, as the
+# operator declares it (the `ends_at` field of RawCode and CallSub).
+#   "check": nothing declared. The post reads the code; if it can move the
+#       slide, the post doesn't know where the slide is and refuses to move it
+#       again (the next operation, or the end-of-program retract).
+#   "tool_change_z": the operator declares the code always finishes with the
+#       slide back at the tool-change Z, clear of the work. The post then
+#       calls the next tool from there, and warns that it is relying on this.
+# "check" is the default because it assumes nothing: a declaration of a safe
+# position must be something the operator chose, never something they got by
+# leaving a field alone. Kept here so the post and both operations spell the
+# choices the same way.
+ENDS_AT = ("check", "tool_change_z")
+
+
 @dataclass(kw_only=True)
 class Operation:
     t: int  # OmniTurn station number

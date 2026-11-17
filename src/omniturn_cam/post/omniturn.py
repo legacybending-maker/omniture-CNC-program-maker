@@ -14,7 +14,14 @@ from ..gcode import PostError, fmt, sanitize_comment  # noqa: F401  (re-exported
 from ..geometry import Arc, Point, Profile
 from ..job import Job
 from ..operations import Operation, spec_for
+from ..operations.base import ENDS_AT
 from ..tools import Station
+from .external import analyse, subroutine_bodies
+from .state import POSITION, UNKNOWN, MachineState
+
+# Forgotten after every handoff to raw code or a subroutine, whatever the code
+# says: see OmniTurnPost.resume_after for why each is on the list.
+ALWAYS_FORGOTTEN = frozenset({"tool", "spindle", "rpm", "coolant", "feed", "motion"})
 
 
 @dataclass
@@ -83,22 +90,36 @@ class MachineConfig:
 
 
 class OmniTurnPost:
+    """Writes one job as an OmniTurn program.
+
+    ``self.state`` (a MachineState) is what the post knows about the control
+    while it writes; see post/state.py. Two rules hold everywhere below:
+
+    * A mode is written when the state doesn't already know it is set, and
+      skipped only when the state *knows* it is (that's what keeps programs
+      free of redundant lines without trusting stale knowledge).
+    * The slide is never moved from a position the post doesn't know. The one
+      move allowed without known X and Z is the approach after a tool call, and
+      only when the slide is known to be clear at the tool-change Z.
+    """
+
     def __init__(self, job: Job, machine: MachineConfig | None = None):
         self.job = job
         self.m = machine or MachineConfig.for_units(job.units)
         self.lines: list[str] = []
-        self.x: float | None = None
-        self.z: float | None = None
-        self.motion: str | None = None  # "rapid" | "feed" | None (unknown)
-        self.feed_mode = "g94"
-        self.feed: float | None = None
-        self.tool: int | None = None
-        self.rpm: float | None = None
-        self.spindle: str | None = None
-        self.coolant = False
+        self.state = MachineState()
         self.subs: dict[str, int] = {}  # profile name -> subroutine number
         self.warnings: list[str] = []
         self.external_text, self.external_nums = job.external_subs()
+        # The include file's subroutines by number, so a raw M98 or a Call
+        # subroutine operation can be read before the post decides what it changed.
+        self.external_bodies = subroutine_bodies(self.external_text)
+        # The operation being written (1-based) and the operation itself, for
+        # error messages that say where the problem is (CONTRIBUTING: Usability).
+        self.op_number = 0
+        self.op: Operation | None = None
+        # When the slide position is unknown: which operation lost it, and why.
+        self.position_lost = ""
 
     # ------------------------------------------------------------------ format
     def n(self, v: float) -> str:
@@ -151,56 +172,157 @@ class OmniTurnPost:
         if c:
             self.emit(f"({c})")
 
+    @property
+    def here(self) -> str:
+        """The current operation in operator terms, e.g. 'operation 3 (finish t1)'."""
+        op = self.op
+        if op is None:
+            return "the end of the program"
+        tool = f" t{op.t}" if op.uses_tool else ""
+        return f"operation {self.op_number} ({op.label}{tool})"
+
     def _axes(self, x, z, both=False) -> str:
+        # `x`/`z` are where to go (None = this axis doesn't move); the state's
+        # x/z are where the slide is (UNKNOWN = don't know). Two different
+        # "nothing" values for two different meanings; see state.Unknown.
+        s = self.state
         w = ""
-        if x is not None and (both or self.x is None or abs(x - self.x) > 1e-9):
+        if x is not None and (both or s.x is UNKNOWN or abs(x - s.x) > 1e-9):
             w += "x" + self.n(x)
-        if z is not None and (both or self.z is None or abs(z - self.z) > 1e-9):
+        if z is not None and (both or s.z is UNKNOWN or abs(z - s.z) > 1e-9):
             w += "z" + self.n(z)
         return w
 
     def _moved(self, x, z):
+        s = self.state
         if x is not None:
-            self.x = x
+            s.x = x
         if z is not None:
-            self.z = z
+            s.z = z
+        # "Clear" follows from the position whenever the post knows it: the
+        # slide is clear exactly when it is at the tool-change Z.
+        s.clear = s.z is not UNKNOWN and abs(s.z - self.m.tool_call_z) < 1e-9
+
+    # ------------------------------------------------------------------ guards
+    def _refuse_unknown_position(self, what: str) -> None:
+        """Raise PostError: the post was asked to move from a position it doesn't know."""
+        after = f" after {self.position_lost}" if self.position_lost else ""
+        raise PostError(
+            f"{self.here}: can't {what}: the post doesn't know where the slide is{after}. "
+            "Moving from an unknown position could run a tool into the work or the collet. "
+            "If that code always finishes with the slide back at the tool-change Z, clear of the "
+            "work, set its 'Slide position afterwards' to 'tool_change_z' and prove it out in "
+            "single block; otherwise change it so it doesn't move the slide"
+        )
+
+    def _check_modes(self) -> None:
+        """Backstop before every move: the modes that give X and Z their meaning must
+        be known. ``establish_modes`` (called by every tool call) sets them, so this
+        only fires if an operation moves without calling a tool first, which is a
+        bug in that operation. Refusing beats guessing what the numbers mean."""
+        s = self.state
+        units = "g71" if self.job.units == "metric" else "g70"
+        if s.units != units or s.coords != "g90" or s.diameter != "g72" or s.comp is UNKNOWN:
+            raise PostError(
+                f"{self.here}: internal error, a move was written before the units, G90, "
+                f"G72 and comp were established ({', '.join(s.unknown_fields()) or 'wrong mode'}). "
+                "Please report this; the program was not written"
+            )
+
+    def establish_modes(self) -> None:
+        """Write whichever of G40, G70/G71, G90 and G72 the state doesn't know are set.
+
+        These four decide what every X and Z number means, and the header sets
+        them. After raw code that may have changed one, the next tool call
+        writes it again here, before the tool call line, because the line after
+        a tool call must be the X and Z move (p2.9). Same lines and order as the
+        header. When all four are known, this writes nothing.
+        """
+        s = self.state
+        if s.comp != "g40":
+            # Nothing the post writes runs comp across operations (finish turns
+            # it off before it ends), so anything else here came from external
+            # code. Cancel it: the next move is the approach in free air (p2.32).
+            self.emit("g40")
+            s.comp = "g40"
+        units = "g71" if self.job.units == "metric" else "g70"
+        if s.units != units:
+            self.emit(units)
+            s.units = units
+        words = ("g90" if s.coords != "g90" else "") + ("g72" if s.diameter != "g72" else "")
+        if words:
+            self.emit(words)
+            s.coords, s.diameter = "g90", "g72"
 
     # ------------------------------------------------------------------ motion
     def rapid(self, x=None, z=None, both=False) -> None:
+        s = self.state
         words = self._axes(x, z, both)
         if not words:
             return
-        prefix = "" if self.motion == "rapid" else "g00"
+        # The approach after a tool call is the only move that may start
+        # without a known position, and only from the tool-change Z.
+        tool_call_approach = both and x is not None and z is not None and s.clear
+        if not s.position_known and not tool_call_approach:
+            self._refuse_unknown_position(f"rapid {words}")
+        self._check_modes()
+        prefix = "" if s.motion == "rapid" else "g00"
         self.emit(prefix + words)
-        self.motion = "rapid"
+        s.motion = "rapid"
         self._moved(x, z)
 
     def _feed_prefix(self, feed: float) -> str:
-        if self.feed_mode != "g95" or self.feed is None or abs(feed - self.feed) > 1e-12:
-            self.feed_mode, self.feed = "g95", feed
+        s = self.state
+        if s.feed_mode != "g95" or s.feed is UNKNOWN or abs(feed - s.feed) > 1e-12:
+            s.feed_mode, s.feed = "g95", feed
             return "g95f" + self.f(feed)
-        return "" if self.motion == "feed" else "g01"
+        return "" if s.motion == "feed" else "g01"
 
     def set_feed(self, feed: float) -> None:
         """Establish IPR mode and feed on a line of its own (before cycles/arcs)."""
-        if self.feed_mode != "g95" or self.feed is None or abs(feed - self.feed) > 1e-12:
+        s = self.state
+        if s.feed_mode != "g95" or s.feed is UNKNOWN or abs(feed - s.feed) > 1e-12:
             self.emit("g95f" + self.f(feed))
-            self.feed_mode, self.feed = "g95", feed
+            s.feed_mode, s.feed = "g95", feed
+
+    def set_feed_mode(self, mode: str) -> None:
+        """Write G94 or G95 alone unless the state knows it's already in effect.
+
+        Used before a cycle that carries its own F word (G81/G83): the F means
+        inches per rev only in G95, and per minute in G94 (p2.11), so the mode
+        must be certain, not remembered from before some raw code.
+        """
+        if self.state.feed_mode != mode:
+            self.emit(mode)
+            self.state.feed_mode = mode
 
     def cut(self, x=None, z=None, feed: float = 0.0, extra: str = "") -> None:
         words = self._axes(x, z)
         if not words:
             return
+        if not self.state.position_known:
+            self._refuse_unknown_position(f"feed {words}")
+        self._check_modes()
         self.emit(self._feed_prefix(feed) + words + extra)
-        self.motion = "feed"
+        self.state.motion = "feed"
         self._moved(x, z)
+
+    def cycle_ended_at(self, x: float, z: float) -> None:
+        """Record where a canned cycle (G74/G75/G78/G81/G83/G33) left the slide.
+
+        The manual says each of these returns the tool to its start point; the
+        G00/G01 modal afterwards isn't documented, so it becomes UNKNOWN and the
+        next move states it.
+        """
+        self._moved(x, z)
+        self.state.motion = UNKNOWN
 
     def dwell(self, seconds: float) -> None:
         if seconds <= 0:
             return
         self.emit("g04f" + fmt(max(seconds, 0.1), 2))
         # G04 uses the F word; force the next cutting move to restate its feed.
-        self.feed = None
+        self.state.feed = UNKNOWN
 
     # ------------------------------------------------------------------ geometry
     def arc_words(self, start: Point, seg: Arc) -> str:
@@ -221,7 +343,7 @@ class OmniTurnPost:
         for seg in prof.segments:
             if isinstance(seg, Arc):
                 self.emit(self.arc_words(cur, seg))
-                self.x, self.z = seg.end.x, seg.end.z
+                self._moved(seg.end.x, seg.end.z)
             else:
                 corner = ""
                 if seg.chamfer:
@@ -256,19 +378,37 @@ class OmniTurnPost:
         raise PostError(f"t{op.t} {op.label}: give rpm or sfm")
 
     def spindle_on(self, op: Operation, dia: float) -> None:
+        s = self.state
         rpm = round(self.est_rpm(op, dia))
-        if self.spindle != op.spindle or self.rpm != rpm:
-            if self.spindle != op.spindle:
+        # The S word below is an rpm only in G97; in G96 it would be a surface
+        # speed (p2.52). Every operation starts its spindle in G97 (CSS ones
+        # switch to G96 later, in css_on), so make G97 certain first.
+        if s.spindle_mode != "g97":
+            self.emit("g97")
+            s.spindle_mode = "g97"
+        if s.spindle != op.spindle or s.rpm != rpm:
+            if s.spindle != op.spindle:
                 self.emit(f"{op.spindle}s{rpm}")
             else:
                 self.emit(f"s{rpm}")
-            self.spindle, self.rpm = op.spindle, rpm
-        if op.coolant and not self.coolant:
-            self.emit("m08")
-            self.coolant = True
-        elif not op.coolant and self.coolant:
-            self.emit("m09")
-            self.coolant = False
+            s.spindle, s.rpm = op.spindle, rpm
+        # Coolant has three states, so both directions are written whenever the
+        # state doesn't already know it's right: after raw code the post can't
+        # tell whether coolant is on or off, and assuming either is a guess.
+        want = "m08" if op.coolant else "m09"
+        if s.coolant != want:
+            self.emit(want)
+            s.coolant = want
+
+    def stop_spindle(self) -> None:
+        """M05, recorded: the next spindle_on restarts it with M03/M04."""
+        self.emit("m05")
+        self.state.spindle = "m05"
+
+    def set_comp(self, code: str) -> None:
+        """Write G40/G41/G42 and record it, so the state always knows whether comp is on."""
+        self.emit(code)
+        self.state.comp = code
 
     def css_on(self, op: Operation) -> None:
         if op.sfm and not op.rpm:
@@ -276,26 +416,38 @@ class OmniTurnPost:
             if op.min_rpm:
                 self.emit(f"g76s{round(op.min_rpm)}")
             self.emit(f"g77s{round(op.max_rpm or self.m.max_rpm)}")
+            self.state.spindle_mode = "g96"
 
     def css_off(self, op: Operation) -> None:
         if op.sfm and not op.rpm:
+            if self.state.rpm is UNKNOWN:
+                # spindle_on in the same operation always sets it; refuse rather than write "s".
+                raise PostError(f"{self.here}: internal error, no rpm to return to after CSS")
             self.emit("g97")
-            self.emit(f"s{self.rpm}")
+            self.emit(f"s{self.state.rpm}")
+            self.state.spindle_mode = "g97"
 
     def call_tool(self, op: Operation, approach_x: float, spindle_dia: float) -> None:
         st = self.station(op)
-        if self.tool != op.t:
-            if self.tool is not None:
+        s = self.state
+        self.establish_modes()
+        if s.tool is UNKNOWN or s.tool != op.t:
+            if not s.clear:
+                if not s.position_known:
+                    self._refuse_unknown_position(f"call t{op.t}")
+                # Retract in Z alone to the tool-change Z, from a known position.
                 self.rapid(z=self.m.tool_call_z)
-            if self.motion != "rapid":
+            if s.motion != "rapid":
                 self.emit("g00")
-                self.motion = "rapid"
+                s.motion = "rapid"
             name = sanitize_comment(st.tool.comment, self.m.max_comment)
             self.emit(f"t{op.t}({name})" if name else f"t{op.t}")
-            # The line after a tool call must carry BOTH X and Z (manual p2.9).
-            self.x = self.z = None
+            s.tool = op.t
+            # The new tool's offsets change what X and Z mean, and the line
+            # after a tool call must carry BOTH X and Z (manual p2.9). `clear`
+            # stays True: the slide hasn't moved, so this approach is safe.
+            s.x = s.z = UNKNOWN
             self.rapid(approach_x, self.m.tool_call_z, both=True)
-            self.tool = op.t
         self.spindle_on(op, spindle_dia)
         if op.comment:
             self.comment(op.comment)
@@ -339,15 +491,59 @@ class OmniTurnPost:
                     f"cycle start x{sx} z{sz} - the control will reject this (manual p2.42)"
                 )
 
-    def leave_known_state(self) -> None:
-        """Before handing control to code we didn't write, park the slide at safe Z."""
-        if self.tool is not None:
+    # ------------------------------------------------------------------ handing control to other code
+    # Raw program lines and M98 calls run code the post didn't write. The
+    # contract (docs/omniturn-post-rules.md, "Handing control to code the post
+    # didn't write"): park only from a known position; afterwards forget
+    # everything the code could have changed; never guess where the slide is;
+    # let the next operation re-establish its modes; refuse when it can't.
+
+    def park_before_handoff(self) -> None:
+        """Before external code: rapid to the tool-change Z, in Z alone, if the post
+        knows where the slide is and it isn't there already. From an unknown
+        position it doesn't move at all."""
+        s = self.state
+        if s.position_known and not s.clear:
             self.rapid(z=self.m.tool_call_z)
 
-    def forget_state(self) -> None:
-        # the subroutine / raw code may move, change tools or spindle: forget what we know
-        self.x = self.z = self.motion = self.feed = None
-        self.spindle = self.rpm = self.tool = None
+    def resume_after(self, code: list[str], ends_at: str, what: str) -> None:
+        """After external code: forget what it could have changed.
+
+        ``code`` is the lines that were handed over (for a subroutine call, the
+        ``m98pN`` line); ``external.analyse`` reads them, and any subroutine of
+        the include file they call, and says what they could change. On top
+        of that the tool, spindle, rpm, coolant, feed and G00/G01 are always
+        forgotten: they're cheap to state again, and the spindle and
+        coolant are physical outputs a loader routine or the operator (at an
+        M00) commonly changes. Forgetting the tool also means the next operation
+        calls its tool again, re-applying its offsets.
+
+        ``ends_at`` is the operator's declaration on the operation:
+        "check" (not declared: nothing assumed) or "tool_change_z" (the code
+        always finishes with the slide back at the tool-change Z, clear of the
+        work). The declaration is the only way the post accepts a position it
+        can't see; it is warned about every time it's relied on.
+
+        Raises PostError for an ``ends_at`` it doesn't recognise (a typo in a
+        hand-edited job file must not count as either answer).
+        """
+        if ends_at not in ENDS_AT:
+            raise PostError(
+                f"{what}: 'Slide position afterwards' is {ends_at!r}; it must be one of {', '.join(ENDS_AT)}"
+            )
+        effects = analyse(code, self.external_bodies)
+        s = self.state
+        s.forget(ALWAYS_FORGOTTEN | effects.forget)
+        if ends_at == "tool_change_z" and not s.clear:
+            s.forget(POSITION)
+            s.clear = True
+            self.position_lost = ""
+            self.warn(
+                f"{what}: relying on your declaration that it always finishes with the slide at the "
+                "tool-change Z, clear of the work. Prove it out in single block before running the job"
+            )
+        elif effects.moves_slide:
+            self.position_lost = f"{what}: {effects.reason}"
 
     # ------------------------------------------------------------------ program
     def header(self) -> None:
@@ -367,23 +563,45 @@ class OmniTurnPost:
                 f"capacity set for the {self.m.name}"
             )
         # Safe start: cancel TNR comp, set units, absolute, diameter, IPM, RPM mode.
+        units = "g71" if j.units == "metric" else "g70"
         self.emit("g40")
-        self.emit("g71" if j.units == "metric" else "g70")
+        self.emit(units)
         self.emit(f"g90g72g94g97f{fmt(self.m.rapid_feed, 1)}")
-        self.feed_mode, self.feed = "g94", self.m.rapid_feed
+        s = self.state
+        s.comp, s.units, s.coords, s.diameter = "g40", units, "g90", "g72"
+        s.feed_mode, s.spindle_mode, s.feed = "g94", "g97", self.m.rapid_feed
+        # Everything else stays UNKNOWN: where the slide is, the spindle, the
+        # coolant (the last program may have ended with M02, which leaves M
+        # functions on; "Program end" in the post rules), the tool. The one thing the post takes on trust
+        # is the operator's job at cycle start: the slide is clear of the work at
+        # the tool-change position, so the first tool call's X/Z approach is
+        # safe. Every program has always relied on that; it's written down here.
+        s.clear = True
 
     def footer(self) -> None:
-        self.rapid(z=self.m.tool_call_z)
-        if self.coolant:
+        self.op_number, self.op = 0, None
+        s = self.state
+        if not s.clear:
+            if s.position_known:
+                self.rapid(z=self.m.tool_call_z)
+            else:
+                self.warn(
+                    f"the program ends without returning to the tool-change Z: the slide position is "
+                    f"unknown after {self.position_lost}. Bring the slide clear before the next cycle start"
+                )
+        if s.coolant != "m09":
             self.emit("m09")
+            s.coolant = "m09"
         self.emit("m05")
         self.emit("m30")
+        # The subroutines are separate programs after M30: the position here only
+        # drives _axes, so each starts from "unknown" and writes both X and Z.
         for name, num in self.subs.items():
             prof = self.job.profiles[name]
             self.emit(f"}}{num}")
-            self.x = self.z = None
+            s.x = s.z = UNKNOWN
             self.emit(self._axes(prof.start.x, prof.start.z, both=True))
-            self.x, self.z = prof.start.x, prof.start.z
+            self._moved(prof.start.x, prof.start.z)
             self.contour(prof, feed=None)
             self.emit("m99")
         if self.external_text.strip():
@@ -393,7 +611,9 @@ class OmniTurnPost:
 
     def run(self) -> str:
         self.header()
-        for op in self.job.operations:
+        # enumerate(..., 1) counts from 1, the way the process list numbers operations.
+        for i, op in enumerate(self.job.operations, 1):
+            self.op_number, self.op = i, op
             spec_for(op).emit(self, op)
         self.footer()
         return "\n".join(self.lines) + "\n"

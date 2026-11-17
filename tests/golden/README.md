@@ -14,6 +14,10 @@ listed in `verified.toml`.
   include file).
 - `jobs/metric.toml`: metric; G71 output, two-start angle-infeed thread with
   a spring pass, R corner, G03 arc.
+- `jobs/handoff.toml`, `jobs/handoff_mm.toml`: inch and metric; raw lines
+  and M98 calls between automatic operations, and what the post writes to
+  recover after each (readable and declared subroutines, raw M09, G94, G70,
+  G96, a stop).
 - `examples/manual_g75.toml`, `examples/thread_half13.toml`: the manual's own
   worked examples.
 

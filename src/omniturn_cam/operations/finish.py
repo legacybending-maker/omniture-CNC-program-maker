@@ -59,9 +59,11 @@ def emit(p: OmniTurnPost, op: Finish) -> None:
     p.rapid(x=prof.start.x)
     p.css_on(op)
     if comp != "none":
-        p.emit(comp)
+        # set_comp records it, so the state knows comp is on until the G40
+        # below; nothing else may turn it on or off behind the post's back.
+        p.set_comp(comp)
     dword = f"d{st.d}" if comp != "none" else ""
-    if abs(prof.start.z - sz) < 1e-9 and abs(prof.start.x - p.x) < 1e-9:
+    if abs(prof.start.z - sz) < 1e-9 and abs(prof.start.x - p.state.x) < 1e-9:
         raise PostError("finish start point equals approach point; nothing to turn comp on with")
     p.cut(prof.start.x, prof.start.z, op.feed, dword)
     p.contour(prof, op.feed)
@@ -70,7 +72,7 @@ def emit(p: OmniTurnPost, op: Finish) -> None:
     p.cut(x=prof.end.x + (lead if prof.side == "od" else -lead), feed=op.feed)
     p.rapid(z=sz)
     if comp != "none":
-        p.emit("g40")
+        p.set_comp("g40")
     p.css_off(op)
 
 

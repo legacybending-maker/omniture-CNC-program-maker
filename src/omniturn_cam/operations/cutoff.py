@@ -35,8 +35,7 @@ FIELDS = {
 def emit(p: OmniTurnPost, op: Cutoff) -> None:
     emit_radial(p, op)
     if op.stop_spindle_after:
-        p.emit("m05")
-        p.spindle = None
+        p.stop_spindle()
 
 
 def summary(op: Cutoff) -> list[str]:

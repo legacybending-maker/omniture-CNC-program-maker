@@ -1,0 +1,125 @@
+# Golden-output job: raw program lines and M98 subroutine calls between
+# automatic operations, and how the post recovers after each (issue #27,
+# docs/omniturn-post-rules.md "Handing control to code the post didn't write").
+#
+#   op 1  M98 to a loader sub the post can read; it doesn't move the slide
+#   op 3  M98 to a bar-pull sub that moves the slide; declared to end at the
+#         tool-change Z (the post warns that it relies on that)
+#   op 5  raw M09 + input wait: coolant must be turned back on for op 6
+#   op 7  raw G94 F: the next drill must be back in G95
+#   op 9  raw M05 + M00 (stop to clear chips): the post knows nothing after a
+#         stop, so it's declared, and every mode is written again
+# Not a real part: the point is coverage, not good machining practice.
+#
+# Tool library: examples/tools.toml
+
+[job]
+name = "HANDOFF"
+units = "inch"
+description = "Golden handoff"
+include_subs = "handoff_subs.txt"
+
+[stock]
+diameter = 0.75
+material = "12L14"
+
+[[station]]
+t = 1
+tool = "lh-turn-35"
+d = 1
+
+[[station]]
+t = 2
+tool = "drill-250"
+
+[[station]]
+t = 5
+tool = "cntr-drill-3"
+
+[[station]]
+t = 8
+tool = "cutoff-062"
+
+[profile.od]
+side = "od"
+start = { x = 0.25, z = 0 }
+seg = [
+  { x = 0.5, c = 0.02 },
+  { z = -0.4 },
+  { x = 0.75 },
+]
+
+[[op]]
+type = "call_sub"
+sub = 1
+comment = "Load bar"
+
+[[op]]
+type = "face"
+t = 1
+rpm = 2000
+feed = 0.003
+
+[[op]]
+type = "call_sub"
+sub = 2
+ends_at = "tool_change_z"
+comment = "Pull bar"
+
+[[op]]
+type = "drill"
+t = 5
+rpm = 2500
+z = -0.08
+feed = 0.002
+comment = "Centre drill"
+
+[[op]]
+type = "raw"
+code = """
+m09
+m91
+"""
+comment = "Wait for gauge"
+
+[[op]]
+type = "drill"
+t = 2
+rpm = 1800
+z = -0.3
+feed = 0.003
+
+[[op]]
+type = "raw"
+code = "g94f100"
+
+[[op]]
+type = "drill"
+t = 2
+rpm = 1800
+z = -0.5
+feed = 0.002
+peck = 0.1
+
+[[op]]
+type = "raw"
+code = """
+m05
+m00
+"""
+ends_at = "tool_change_z"
+comment = "Clear chips"
+
+[[op]]
+type = "finish"
+t = 1
+sfm = 400
+profile = "od"
+feed = 0.002
+
+[[op]]
+type = "cutoff"
+t = 8
+rpm = 1500
+z = -0.462
+feed = 0.0015

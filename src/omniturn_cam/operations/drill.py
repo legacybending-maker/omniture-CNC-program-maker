@@ -50,17 +50,18 @@ def emit(p: OmniTurnPost, op: Drill) -> None:
     p.call_tool(op, 0.0, p.station(op).tool.diameter or p.job.stock.diameter)
     p.rapid(x=0.0)
     p.rapid(z=sz)
-    if p.feed_mode != "g95":
-        p.emit("g95")
-        p.feed_mode = "g95"
+    # The cycle's F is per rev only in G95 (p2.11). set_feed_mode writes g95
+    # unless the post *knows* it's already in effect; after raw code that may
+    # have switched to G94 it doesn't know, so g95 is written again.
+    p.set_feed_mode("g95")
     if op.peck:
         r = op.retract_z if op.retract_z is not None else sz
         l = op.peck_rapid or p.m.rapid_feed
         p.emit(f"g83z{p.n(op.z)}k{p.n(op.peck)}f{p.f(op.feed)}r{p.n(r)}c{p.n(op.peck_clearance)}l{fmt(l, 1)}")
     else:
         p.emit(f"g81z{p.n(op.z)}f{p.f(op.feed)}")
-    p.feed = op.feed
-    p.x, p.z, p.motion = 0.0, sz, None
+    p.state.feed = op.feed  # the cycle's F word is now the modal feed
+    p.cycle_ended_at(0.0, sz)  # G81/G83 rapid back to the start (p2.48-2.50)
 
 
 def summary(op: Drill) -> list[str]:

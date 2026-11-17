@@ -170,7 +170,7 @@ def emit(p: OmniTurnPost, op: Thread) -> None:
         # same rpm, same P/C (p2.26).
         for _ in range(op.spring_passes):
             p.emit(words + tail + "o")
-        p.x, p.z, p.motion = sx, zs, None  # cycle returns to its start point
+        p.cycle_ended_at(sx, zs)  # cycle returns to its start point
     p.rapid(x=clear_x)
     if op.lock_overrides:
         p.emit("m85")
