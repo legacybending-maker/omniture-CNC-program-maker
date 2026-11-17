@@ -62,7 +62,9 @@ The only kernel-specific calls are the three in `kernels/`:
 | `gcode.py` | Number format, comment rules and `PostError`, shared by the post and the operations |
 | `tools.py` | Tool library (`tools.toml`) and the tool plate (`Setup` of `Station`s, with D offsets) |
 | `job.py` | `Job`: units, stock, setup, named profiles, ordered operations. Reads/writes job TOML, `JOB_FORMAT` version |
-| `post/omniturn.py` | `MachineConfig` (machine.toml) and `OmniTurnPost`: header/footer, modal-state tracking (position, feed mode, spindle, coolant, tool), motion and tool-call helpers the operations use, subroutines below M30. Dispatches each operation to its spec's `emit` |
+| `post/omniturn.py` | `MachineConfig` (machine.toml) and `OmniTurnPost`: header/footer, motion and tool-call helpers the operations use, the mode-establishing helpers, the handoff to raw code and M98 (`park_before_handoff`, `resume_after`), subroutines below M30. Dispatches each operation to its spec's `emit` |
+| `post/state.py` | `MachineState`: every mode the post relies on, the slide position and the tool, each known or `UNKNOWN` (a value that refuses to be used as true or false) |
+| `post/external.py` | Reads raw lines and include-file subroutines and says which `MachineState` fields they could change. Only ever forgets; anything it can't account for forgets everything |
 | `lint.py` | Checks any program (generated or hand-written) against the manual's formatting rules |
 | `backplot.py` | Interprets a program back into moves for drawing and for the travel check |
 | `stepimport.py`, `meshimport.py`, `modelimport.py` | 3D model → OD/ID profiles |
@@ -89,6 +91,13 @@ These hold for every program the post writes. Each has a test.
 6. **Proven programs don't change silently.** Programs run on the machine are
    listed in `tests/golden/verified.toml`; changing their output fails a test
    until the entry is removed on purpose.
+7. **The post only relies on what it knows.** Every mode and the slide position
+   can be unknown; a mode is skipped only when the post knows it's in effect,
+   and the slide is never moved from an unknown position. After raw code or a
+   subroutine the post forgets what that code could change and the next
+   operation re-establishes it, or the post refuses
+   (`docs/omniturn-post-rules.md`, "Handing control to code the post didn't
+   write"; `tests/test_post.py`).
 
 ## Where machine facts live
 

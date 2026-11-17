@@ -78,6 +78,29 @@ The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the 
 - If a subroutine file will be pasted on the control instead, set `first_sub` above its numbers so they don't clash. The linter flags duplicate subroutine numbers, and M95 with no subroutine 1.
 - Pattern used by omniturn-cam: each finish contour in its own subroutine, called from G75/G78.
 
+## Handing control to code the post didn't write
+Raw program lines and Call subroutine (M98) run code the post didn't generate. The post keeps a record of every mode it relies on and of the slide position (`post/state.py`, `MachineState`), and each entry can be **unknown**. The contract (issue #27):
+
+1. **Before the handoff** the post rapids to the tool-change Z, in Z alone, only if it knows where the slide is. From an unknown position it doesn't move.
+2. **After it**, the post forgets everything the code could have changed. `post/external.py` reads the lines (and, for M98, the subroutine itself when it is in the job's include file, following any M98 inside it) and lists what each word can affect. It only ever *forgets*: it never works out a new value, a new position or where the slide ended up. Any word it can't account for makes it forget everything. The tool, spindle, rpm, coolant, F and G00/G01 are forgotten after every handoff whatever the code says (cheap to restate; spindle and coolant are physical outputs a loader routine or the operator commonly changes).
+3. **The slide is never moved from an unknown position.** If the code can move the slide (any X/Z/U/I/K/R/C/A/O/L/P word, a move or cycle G code, a T or D word, an M98 the post can't read, a stop, a jump, anything unrecognised), the next automatic move is refused with a `PostError` that names the operation. The end-of-program retract is skipped (with a warning) instead of guessed.
+4. **Operator declaration.** Raw code and Call subroutine have *Slide position afterwards* (`ends_at`): `check` (default: nothing declared, nothing assumed) or `tool_change_z` (the operator declares the code always finishes with the slide back at the tool-change Z, clear of the work). With the declaration the post calls the next tool from there, the same precondition as every tool change, and warns every time it relies on it. It's never a default, and a value other than these two is refused.
+5. **The next operation re-establishes what it needs**, writing a mode only when the post doesn't *know* it's already set:
+   - G40, G70/G71, G90 and G72 before the tool call line (the line after it must be the X/Z move, p2.9). Same lines as the header. A G41/G42 left by external code is cancelled with G40 at the tool-change Z; nothing the post writes leaves comp on between operations.
+   - G97 before the spindle S word (in G96, S is a surface speed, p2.52); CSS operations then switch to G96 themselves.
+   - M03/M04 with S, and M08 *or* M09: coolant is on, off or unknown, so both directions are written when it's unknown.
+   - G95 before G81/G83 and before any feed (the F is per rev only in G95, p2.11).
+6. **Program start.** Every program starts with position, spindle, coolant and tool unknown, and the modes the header sets known. The operator starts the program with the slide clear at the tool-change position; the first tool call's X/Z approach relies on that, as it always has. Coolant is unknown at the start (the last program may have ended with M02, which leaves M functions on), so a first operation without coolant writes M09.
+
+Codes `post/external.py` treats as changing nothing the post tracks: M10/M11 and M40–M59 (loader), M91–M94 (input waits), M32/M33/M38 and M60–M65 (PLC outputs) (2.54–2.56); M84/M85 (override lock, 2.56); M12/M13 (collet, "Program end" below; page **VERIFY**); G76/G77 (CSS limits, not tracked; see below). LSn/LF loop markers and block-skip lines are read like any other line: whether a line runs once, ten times or not at all, "may change X" is the same.
+
+**VERIFY** (couldn't be confirmed in the manual; the post takes the cautious side):
+- Whether the G4 lets the operator jog or use MDI during M00/M01. The reader treats a stop in external code as "anything may have changed". The post's own M00/M01 (die-head reset, Axial pass *Stop after*) still assumes the slide isn't moved during the stop (issue #28).
+- Whether G40 removes the offset on the next move (as the lead-off rule on 2.32 implies). The post only cancels unknown comp at the tool-change Z, where that move is in free air.
+- The G00/G01 modal after a canned cycle (G74/G75/G78/G81/G83/G33). Treated as unknown, so the next move states G00 or G01.
+- Whether G76/G77 limits persist between operations. Not tracked: a CSS operation with no min rpm could inherit a G76 from raw code (issue #29).
+- Whether a D word (2.59) stays in effect after the move that carries it. Not tracked; a D word in external code makes the post forget comp and the position (issue #29).
+
 ## Loader, input and override codes (2.54–2.56)
 - M91/M92 wait for HDR111 open/shorted, M93/M94 wait for HDR110 open/shorted. M10/M11 and M40–M59 are loader functions. M32/M33/M38, M60–M65 are PLC outputs.
 - M84 locks the feed and spindle overrides at 100%; M85 unlocks them, and so do M30, M02 and any tool call. omniturn-cam brackets G33 with M84/M85 by default, so the spindle override can't change the rpm between passes.
