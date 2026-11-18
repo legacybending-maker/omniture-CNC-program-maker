@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -9,6 +10,7 @@ from .base import FieldInfo, Operation, OpSpec
 
 if TYPE_CHECKING:
     from ..post.omniturn import OmniTurnPost
+    from ..validation import CheckContext, Issue
 
 
 @dataclass(kw_only=True)
@@ -32,6 +34,13 @@ FIELDS = {
     "x_start": FieldInfo("Start diameter", "dia", "Approach diameter"),
     "x_end": FieldInfo("End diameter", "dia", "Diameter the tool feeds to"),
 }
+
+
+def validate(op: RadialPass, ctx: CheckContext) -> Iterator[Issue]:
+    """Layer 2. An OD groove feeds down (end below start) and an ID groove
+    feeds out (end above start), so only a feed that goes nowhere is refused."""
+    if op.x_end == op.x_start:
+        yield ctx.error("x_end", "is the same as the start diameter: the tool wouldn't move")
 
 
 def emit(p: OmniTurnPost, op: RadialPass) -> None:
@@ -62,4 +71,5 @@ SPEC = OpSpec(
     tool_kinds=("knurl_straddle", "knurl_bump", "groove", "form"),
     fields=FIELDS,
     summary=summary,
+    validate=validate,
 )

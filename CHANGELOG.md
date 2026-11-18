@@ -24,6 +24,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions:
   `check` (default) or `tool_change_z`, the operator's declaration that the
   code always finishes with the slide back at the tool-change Z. The post
   warns every time it relies on the declaration (#27).
+- **Input validation before any code is written** (#32). Every operation's
+  values, every shape, the job, the tool library and the machine profile are
+  checked, and every problem is listed at once with the operation, the
+  setting, the value and what to do, e.g. *operation 2 (drill t2): Peck depth
+  (K) [peck] is 0: must be greater than zero. Leave it blank for a straight G81
+  drill*. Refused now: NaN/infinity anywhere, zero or negative feeds and
+  speeds, a feed per rev over the control's 300 ipm at that rpm (p2.11) or
+  under its .00005 minimum (p2.51), a CSS min above the max, drills/taps/threads
+  that don't feed toward the chuck, swapped thread diameters, zero-length
+  shape segments, chamfers and radii that don't fit their lines, D numbers
+  outside 1-32 (p5.16), and misspelt job `units`.
+- New processes in a metric job start with millimetre values (feed .08,
+  thread M10x1.5, cutoff to -.25...). Changing units still never converts
+  numbers already entered.
 
 ### Changed
 - Each operation type is one file in `operations/` (dataclass, labels, menu
@@ -39,6 +53,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions:
   program.
 
 ### Fixed
+- **machine.toml is checked strictly.** A misspelt setting (`max_rmp`), a
+  section other than `[inch]`/`[metric]`, a quoted number, NaN, or a zero or
+  negative limit now stops with the file, section and setting, instead of
+  being skipped or reaching the arithmetic. Both unit sections are checked.
+- **An explicit `--machine` file that is missing or wrong stops the post**
+  (exit code 2) instead of quietly using the built-in Hardinge profile. With
+  no `--machine` and no personal profile, the built-in one is used and the
+  command says so. The GUI no longer falls back to the built-in profile when
+  your machine.toml can't be used: F5/F6 show what's wrong and make no program
+  until it's fixed.
+- tools.toml: unknown tool kinds, negative nose radius / diameter / width, and
+  bad `pitch`/`tpi` are refused with the file and tool named. Extra keys still
+  go to the tool's params and 0 still means "not given", so old libraries load.
+- Job files: an unknown setting in an `[[op]]` table (with a "did you mean"),
+  a missing required one, `t = 1.5` (used to become T1), and quoted numbers
+  are clear errors instead of Python tracebacks or silent conversions.
 - After raw lines or a subroutine call the post no longer trusts what it knew
   before (#27). It reads the code (and the subroutine, if it's in the include
   file), forgets every mode and the position it could have changed, and the
@@ -56,6 +86,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions:
 - Version numbers agree everywhere (0.2.0); `package.xml` already said 0.2.0.
 
 ### G-code output
+- Input validation (#32): no change to any valid program. Jobs that used to
+  post with the values listed under Added now refuse instead.
 - Programs with raw lines or a subroutine call: modes the code could have
   changed are written again after it (see Fixed). In the golden jobs only
   `bushing.cnc` changes: `m08` after the cutoff's spindle start, because the

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .base import FieldInfo, Operation, OpSpec
 
 if TYPE_CHECKING:
-    from ..post.omniturn import OmniTurnPost
+    from ..post.omniturn import MachineConfig, OmniTurnPost
     from ..tools import Tool
+    from ..validation import CheckContext, Issue
 
 
 @dataclass(kw_only=True)
@@ -40,6 +42,30 @@ FIELDS = {
     "z_start": FieldInfo("Start Z", "z", "Just in front of the work"),
     "z_end": FieldInfo("End Z", "z", "Stop a little short of full depth; the holder floats"),
 }
+
+
+def validate(op: Tap, ctx: CheckContext) -> Iterator[Issue]:
+    """Layer 2: the manual's method (p2.58) feeds in toward the chuck,
+    reverses, and feeds back out to the start."""
+    if op.pitch <= 0:
+        yield ctx.error("pitch", "must be greater than zero", "Lead per rev: 1/TPI, or the pitch in mm")
+    if op.feed_ratio <= 0:
+        yield ctx.error("feed_ratio", "must be greater than zero (the manual uses about .95, p2.58)")
+    if op.z_end >= op.z_start:
+        yield ctx.error("z_end", f"must be below the start Z {op.z_start:g}: the tap feeds toward the chuck (p2.58)")
+
+
+def validate_machine(op: Tap, ctx: CheckContext, m: MachineConfig) -> Iterator[Issue]:
+    """Layer 3: the tapping feed per minute is rpm x pitch x ratio, within the
+    control's fastest feed (p2.11), like a thread."""
+    feed = op.pitch * op.feed_ratio
+    if op.rpm and op.rpm * feed > m.rapid_feed + 1e-9:
+        unit = "ipm" if ctx.inch else "mm/min"
+        yield ctx.error(
+            "rpm",
+            f"x the tapping feed {feed:g} = {op.rpm * feed:g} {unit}, over the {m.rapid_feed:g} limit (p2.11)",
+            f"Slow the spindle to {int(m.rapid_feed / feed)} rpm or less",
+        )
 
 
 def emit(p: OmniTurnPost, op: Tap) -> None:
@@ -74,4 +100,7 @@ SPEC = OpSpec(
     fields=FIELDS,
     summary=summary,
     tool_defaults=tool_defaults,
+    metric_defaults={"z_start": 2.5, "z_end": -10.0, "pitch": 1.25},
+    validate=validate,
+    validate_machine=validate_machine,
 )

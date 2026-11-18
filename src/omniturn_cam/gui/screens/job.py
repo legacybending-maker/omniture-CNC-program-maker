@@ -122,9 +122,13 @@ class JobScreen(Screen):
             self.refresh()
 
     def _preview(self):
-        from ...post.omniturn import OmniTurnPost
+        from ...post.omniturn import MachineConfigError, OmniTurnPost
 
-        p = OmniTurnPost(self.job, self.win.machine)
+        try:
+            p = OmniTurnPost(self.job, self.win.machine)
+        except MachineConfigError as e:
+            self.header.setPlainText(self.win.machine_problem(e))
+            return
         p.header()
         self.header.setPlainText("\n".join(p.lines))
 
@@ -144,7 +148,10 @@ class JobScreen(Screen):
         self.length.setValue(j.stock.length)
         self.bore.setValue(j.stock.bore)
         self.material.setText(j.stock.material)
-        self.units_note.setText("Changing units relabels fields; it does not convert numbers already entered.")
+        self.units_note.setText(
+            "Changing units relabels fields; it does not convert numbers already entered. "
+            "Processes added after the change start with values for the new units."
+        )
         self._preview()
 
 

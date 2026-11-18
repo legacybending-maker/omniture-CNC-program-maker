@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import getpass
+import html
 import os
 from pathlib import Path
 
@@ -55,7 +56,10 @@ class ProgramScreen(Screen):
         self.code = self.win.generate()
         if self.code is None:
             self.text.setPlainText("")
-            self.status.setText(f"<span style='color:#b00020'>{self.win.last_error}</span>")
+            # The status label shows rich text (HTML), where line breaks are
+            # <br> and "<" must be escaped; a list of problems needs both.
+            msg = html.escape(self.win.last_error).replace("\n", "<br>")
+            self.status.setText(f"<span style='color:#b00020'>{msg}</span>")
         else:
             self.text.setPlainText(self.code)
             self.status.setText(

@@ -101,6 +101,19 @@ Codes `post/external.py` treats as changing nothing the post tracks: M10/M11 and
 - Whether G76/G77 limits persist between operations. Not tracked: a CSS operation with no min rpm could inherit a G76 from raw code (issue #29).
 - Whether a D word (2.59) stays in effect after the move that carries it. Not tracked; a D word in external code makes the post forget comp and the position (issue #29).
 
+## Input limits the post enforces (issue #32)
+Checked before any code is written (docs/ARCHITECTURE.md, "Validation"). Only limits the manual states, or that follow from what a word means, are enforced; the rest is left to the operator.
+- **Feed range (2.51, 2.11):** slowest .00005 in/min or in/rev (metric: the same converted, .00127 mm), fastest 300 ipm. In G95 the fastest feed per rev is 300 ipm ÷ rpm ("at 4000 rpm the fastest G95 setting is F.075", 2.11). At a fixed rpm a feed over that is refused; under CSS, where the rpm depends on the diameter, it's a warning. The peck retract feed L (an ipm value) must not exceed `rapid_feed`. A feed that would round to `f0` at `feed_decimals` is refused.
+- **`rapid_feed` in machine.toml** can't exceed 300 ipm / 7620 mm/min (2.11).
+- **Tool numbers** T1–T32 (2.9). **Secondary offsets** D1–D32 (5.16); D0 turns the correction off (2.62), so it can't be a station's nose-radius offset.
+- **G33** lead, first pass I and starts must be positive; infeed angle 0–30° (2.24); fixed rpm only; rpm × K ≤ `rapid_feed` (2.23); the start X must be on the uncut side of the finished X; a taper needs a start X (2.29). The post adds the run-up in +Z, so Z end must be below the start Z, for OD and ID. A run-up under .1 in / 2.5 mm is a warning (2.23).
+- **G81/G83** feed toward the chuck from the start and rapid back (2.48–2.50): depth below the start Z, R above the depth, K > 0, C ≥ 0 (a negative C would rapid into uncut metal).
+- **G74/G75/G78:** I > 0 (2.39, 2.41); G75/G78 U ≥ 0 (stock left); G74's start must differ from its corner in X and Z or there is no box.
+- **C/R corners (2.14–2.15):** only between two lines (already a rule); now also > 0, a real corner (not collinear, not doubling back), and small enough for the lines: a chamfer uses its size along each line, a radius r / tan(angle/2); two corners sharing a line must fit together. Lengths are true lengths, so a step in X is half the X difference (X is a diameter).
+- **CSS (2.52):** G76 min ≤ G77 max (op or machine). A G77 over the machine's `max_rpm` is a warning.
+- **Decimals (G4 Diagnostics sheet):** `decimals` at least 4 inch / 3 metric, since the axes resolve .0001 in on diameter. **VERIFY:** how many decimal places the control reads; no upper limit is enforced.
+- Not enforced on purpose: the sign of any X or Z, the direction of radial and axial passes (ID grooves feed out, back-boring feeds toward the face), rpm over `max_rpm` (a warning, as before: the control caps it at its own parameter).
+
 ## Loader, input and override codes (2.54–2.56)
 - M91/M92 wait for HDR111 open/shorted, M93/M94 wait for HDR110 open/shorted. M10/M11 and M40–M59 are loader functions. M32/M33/M38, M60–M65 are PLC outputs.
 - M84 locks the feed and spindle overrides at 100%; M85 unlocks them, and so do M30, M02 and any tool call. omniturn-cam brackets G33 with M84/M85 by default, so the spindle override can't change the rpm between passes.

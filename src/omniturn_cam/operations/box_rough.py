@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .base import FieldInfo, Operation, OpSpec
 
 if TYPE_CHECKING:
-    from ..post.omniturn import OmniTurnPost
+    from ..post.omniturn import MachineConfig, OmniTurnPost
+    from ..validation import CheckContext, Issue
 
 
 @dataclass(kw_only=True)
@@ -34,10 +36,38 @@ FIELDS = {
 }
 
 
+def _start(op: BoxRough, stock_x: float, z_clear: float) -> tuple[float, float]:
+    """The cycle start point: the one given, or the automatic one. One
+    function for emit() and validate_machine(), so the check can't drift
+    from the start point the program really uses."""
+    sx = op.start_x if op.start_x is not None else stock_x
+    sz = op.start_z if op.start_z is not None else z_clear
+    return sx, sz
+
+
+def validate(op: BoxRough, ctx: CheckContext) -> Iterator[Issue]:
+    """Layer 2. G74 removes the rectangle between its start point and X/Z
+    (p2.38-2.39), so a start level with the corner in X or Z leaves no box."""
+    if op.depth <= 0:
+        yield ctx.error("depth", "must be greater than zero (G74 I is the depth per pass, p2.39)")
+    if op.start_x is not None and op.start_x == op.x:
+        yield ctx.error("x", "is the same as the cycle start X: there is no box to remove")
+    if op.start_z is not None and op.start_z == op.z:
+        yield ctx.error("z", "is the same as the cycle start Z: there is no box to remove")
+
+
+def validate_machine(op: BoxRough, ctx: CheckContext, m: MachineConfig) -> Iterator[Issue]:
+    """Layer 3: with the start left blank it comes from machine.toml clearances."""
+    sx, sz = _start(op, ctx.job.stock.diameter + 2 * m.x_clear, m.z_clear)
+    if op.start_x is None and sx == op.x:
+        yield ctx.error("x", f"is the same as the automatic start X {sx:g}: there is no box to remove")
+    if op.start_z is None and sz == op.z:
+        yield ctx.error("z", f"is the same as the automatic start Z {sz:g}: there is no box to remove")
+
+
 def emit(p: OmniTurnPost, op: BoxRough) -> None:
     """G74: the control removes the rectangle between the start point and X/Z (p2.39)."""
-    sx = op.start_x if op.start_x is not None else p.stock_x
-    sz = op.start_z if op.start_z is not None else p.m.z_clear
+    sx, sz = _start(op, p.stock_x, p.m.z_clear)
     p.call_tool(op, sx, p.job.stock.diameter)
     p.rapid(x=sx)
     p.rapid(z=sz)
@@ -57,4 +87,7 @@ SPEC = OpSpec(
     emit=emit,
     tool_kinds=("turn", "bore"),
     fields=FIELDS,
+    metric_defaults={"depth": 0.5, "u": 0.25, "feed": 0.08},
+    validate=validate,
+    validate_machine=validate_machine,
 )

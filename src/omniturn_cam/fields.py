@@ -21,6 +21,7 @@ FIELDS: dict[str, FieldInfo] = {
         "Fixed spindle speed (G97). Leave blank to use surface speed",
         group="Speed",
         optional=True,
+        blank="surface speed",  # what blank does, shown in the box and in error messages
     ),
     "sfm": FieldInfo(
         "Surface speed",
@@ -28,6 +29,7 @@ FIELDS: dict[str, FieldInfo] = {
         "Constant surface speed (G96), SFM or m/min. Used when RPM is blank",
         group="Speed",
         optional=True,
+        blank="fixed RPM",
     ),
     "min_rpm": FieldInfo(
         "CSS min RPM",
@@ -114,12 +116,10 @@ def is_required(op_cls, name: str) -> bool:
     return f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING
 
 
-def new_operation(kind: str, t: int, tool=None, **overrides) -> Operation:
-    """Create an operation with sensible blanks filled in, pre-loaded from the tool."""
-    spec = SPECS[kind]
-    cls = spec.cls
-    vals: dict = {"t": t, "rpm": spec.default_rpm}
-    req = {
+# Starting values for required fields (no dataclass default), per unit
+# system. Any other required field starts at 0.
+REQUIRED_DEFAULTS: dict[str, dict] = {
+    "inch": {
         "profile": "od",
         "z": 0.0,
         "x": 0.0,
@@ -128,7 +128,40 @@ def new_operation(kind: str, t: int, tool=None, **overrides) -> Operation:
         "x_start": 1.0,
         "x_end": 0.0,
         "feed": 0.003,
-    }
+    },
+    "metric": {
+        "profile": "od",
+        "z": 0.0,
+        "x": 0.0,
+        "z_start": 1.0,
+        "z_end": -6.0,
+        "x_start": 25.0,
+        "x_end": 0.0,
+        "feed": 0.08,
+    },
+}
+
+
+def new_operation(kind: str, t: int, tool=None, units: str = "inch", **overrides) -> Operation:
+    """Create an operation with sensible blanks filled in, pre-loaded from the tool.
+
+    ``units`` is the job's ("inch" or "metric") and picks the starting values:
+    a metric job gets millimetre feeds and lengths (OpSpec.metric_defaults and
+    REQUIRED_DEFAULTS), not inch numbers with "mm" next to them. Only new
+    operations are affected; nothing here touches values already in a job.
+    ``**overrides`` collects any other keyword arguments into a dict, and
+    those win over everything else.
+
+    Raises ValueError for units other than inch or metric.
+    """
+    if units not in REQUIRED_DEFAULTS:
+        raise ValueError(f"units must be inch or metric, not {units!r}")
+    spec = SPECS[kind]
+    cls = spec.cls
+    vals: dict = {"t": t, "rpm": spec.default_rpm}
+    if units == "metric":
+        vals.update(spec.metric_defaults)
+    req = REQUIRED_DEFAULTS[units]
     for name in cls.__dataclass_fields__:
         if is_required(cls, name) and name not in vals:
             vals[name] = req.get(name, 0.0)
@@ -173,5 +206,6 @@ __all__ = [
     "form_fields",
     "is_required",
     "new_operation",
+    "REQUIRED_DEFAULTS",
     "summary",
 ]

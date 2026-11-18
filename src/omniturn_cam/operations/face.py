@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,7 @@ from .base import FieldInfo, Operation, OpSpec
 
 if TYPE_CHECKING:
     from ..post.omniturn import OmniTurnPost
+    from ..validation import CheckContext, Issue
 
 
 @dataclass(kw_only=True)
@@ -30,6 +32,20 @@ FIELDS = {
     "stock": FieldInfo("Face stock", "len", "Material left on the face to remove"),
     "depth_per_pass": FieldInfo("Depth per pass", "len", "Blank = one pass", optional=True),
 }
+
+
+def validate(op: Face, ctx: CheckContext) -> Iterator[Issue]:
+    """Layer 2. No rule on which way X runs: facing in toward the centre is
+    usual, but facing out (from a bore) is a real cut too, so only a cut that
+    goes nowhere is refused."""
+    if op.stock < 0:
+        yield ctx.error("stock", "can't be negative", "0 for a single pass at the finished Z")
+    if op.depth_per_pass is not None and op.depth_per_pass <= 0:
+        # emit() reads `depth_per_pass or stock`, so 0 used to mean one pass
+        # without saying so. Blank is the documented way to ask for that.
+        yield ctx.error("depth_per_pass", "must be greater than zero", "Leave it blank for one pass")
+    if op.x_start is not None and op.x_end is not None and op.x_start == op.x_end:
+        yield ctx.error("x_end", "is the same as the start diameter: the cut would go nowhere")
 
 
 def emit(p: OmniTurnPost, op: Face) -> None:
@@ -63,4 +79,6 @@ SPEC = OpSpec(
     emit=emit,
     tool_kinds=("turn", "face"),
     fields=FIELDS,
+    metric_defaults={"feed": 0.08},
+    validate=validate,
 )

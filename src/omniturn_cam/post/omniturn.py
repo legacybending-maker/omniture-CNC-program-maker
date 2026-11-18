@@ -7,8 +7,11 @@ checked by omniturn_cam.lint before it is returned.
 
 from __future__ import annotations
 
+import difflib
 import math
-from dataclasses import dataclass, field
+import tomllib
+from dataclasses import dataclass, field, fields, replace
+from pathlib import Path
 
 from ..gcode import PostError, fmt, sanitize_comment  # noqa: F401  (re-exported)
 from ..geometry import Arc, Point, Profile
@@ -16,6 +19,7 @@ from ..job import Job
 from ..operations import Operation, spec_for
 from ..operations.base import ENDS_AT
 from ..tools import Station
+from ..validation import Issue, ValidationError, format_issues, show, type_issues
 from .external import analyse, subroutine_bodies
 from .state import POSITION, UNKNOWN, MachineState
 
@@ -54,11 +58,112 @@ class MachineConfig:
     # past any numbers used by the job's include file.
     first_sub: int = 1
 
+    def __post_init__(self):
+        """Refuse an impossible profile the moment one is made, however it was
+        made (machine.toml, for_units, a test). ``__post_init__`` is the hook
+        a dataclass calls at the end of its generated ``__init__``."""
+        problems = self.issues()
+        if problems:
+            raise MachineConfigError(problems)
+
+    def issues(self, where: str = "machine settings") -> list[Issue]:
+        """Every problem with these settings (validation.py, Issue)."""
+        type_problems = type_issues(self, where, describe=lambda n: n, skip={"arc_codes"})
+        if type_problems:
+            return type_problems  # the range checks below compare numbers
+        out: list[Issue] = []
+
+        def bad(name: str, problem: str, fix: str = "") -> None:
+            out.append(Issue(where, problem, fix, setting=name, value=show(getattr(self, name))))
+
+        inch = self.units == "inch"
+        if self.units not in ("inch", "metric"):
+            bad("units", "must be inch or metric")
+            return out
+        if not self.name.strip():
+            bad("name", "can't be empty: it's printed in every program header")
+        # Machine limits: a zero or negative limit is never a real machine.
+        for name in ("rapid_feed", "max_rpm", "z_clear", "x_clear"):
+            if getattr(self, name) <= 0:
+                bad(name, "must be greater than zero")
+        # p2.11 / p2.51: 300 ipm is the G4's fastest feed and rapid. A higher
+        # rapid_feed would let threads and feeds through that it can't run.
+        limit = 300.0 if inch else 300.0 * 25.4
+        if self.rapid_feed > limit + 1e-9:
+            bad("rapid_feed", f"is over the G4's fastest feed, {limit:g} (manual p2.11)")
+        if self.tool_call_z <= self.z_clear:
+            bad(
+                "tool_call_z",
+                f"must be farther out than z_clear ({self.z_clear:g}): tools are called there, clear of the work",
+            )
+        for name in ("x_travel", "z_travel", "max_bar"):
+            v = getattr(self, name)
+            if v is not None and v < 0:
+                bad(name, "can't be negative", "0 turns this check off")
+        # The axes resolve .0001 in on diameter (G4 Diagnostics sheet); fewer
+        # places would round programmed sizes coarser than the machine cuts.
+        fewest = 4 if inch else 3
+        if self.decimals < fewest:
+            bad("decimals", f"must be {fewest} or more: the axes resolve .0001 in on diameter (G4 Diagnostics)")
+        if self.feed_decimals < 1:
+            bad("feed_decimals", "must be 1 or more")
+        if self.arc_format not in ("r", "ik"):
+            bad("arc_format", "must be r or ik")
+        codes = self.arc_codes
+        if not isinstance(codes, dict) or set(codes) != {"ccw", "cw"} or sorted(codes.values()) != ["g02", "g03"]:
+            # Arc direction decides which way every arc bulges; the mapping
+            # is CONFIRMED in docs/omniturn-post-rules.md. Anything but the two
+            # codes, one each, is refused outright.
+            bad(
+                "arc_codes",
+                "must map ccw and cw to g02 and g03, one each",
+                'The default is { ccw = "g02", cw = "g03" }',
+            )
+        if self.max_comment < 1:
+            bad("max_comment", "must be 1 or more")
+        if self.first_sub < 1:
+            bad("first_sub", "must be 1 or more")
+        return out
+
     @classmethod
-    def for_units(cls, units: str, overrides: dict | None = None) -> MachineConfig:
+    def _key_problems(cls, values: dict, where: str) -> list[Issue]:
+        """Keys in ``values`` that aren't settings, and ``units`` (the job
+        decides those). Unknown keys used to be skipped, so a misspelt
+        ``max_rmp = 2500`` left the 4000 rpm default in force without a word."""
+        known = {f.name for f in fields(cls)} - {"units"}
+        out = []
+        for k in values:
+            if k == "units":
+                out.append(
+                    Issue(
+                        where,
+                        "comes from each job (F1 Job & blank), not the machine profile",
+                        "Remove it",
+                        setting="units",
+                    )
+                )
+            elif k not in known:
+                # difflib.get_close_matches: the known names that look most
+                # like the typo, best first.
+                close = difflib.get_close_matches(k, known, 1)
+                fix = f"Did you mean {close[0]}?" if close else "Known settings: " + ", ".join(sorted(known))
+                out.append(Issue(where, "is not a machine setting", fix, setting=k))
+        return out
+
+    @classmethod
+    def for_units(cls, units: str, overrides: dict | None = None, where: str = "machine settings") -> MachineConfig:
+        """The default profile for ``units`` with ``overrides`` applied.
+
+        Raises MachineConfigError for an unknown key, for ``units``, and for
+        any bad value; ``where`` says where the values came from.
+        """
+        overrides = overrides or {}
+        problems = cls._key_problems(overrides, where)
+        if problems:
+            raise MachineConfigError(problems)
+        values: dict = {}
         if units == "metric":
-            m = cls(
-                units="metric",
+            values = dict(
                 rapid_feed=7620.0,
                 tool_call_z=25.0,
                 z_clear=1.0,
@@ -69,24 +174,75 @@ class MachineConfig:
                 x_travel=254.0,
                 z_travel=228.6,
             )
-        else:
-            m = cls()
-        for k, v in (overrides or {}).items():
-            if k == "units" or k not in cls.__dataclass_fields__:
-                continue
-            setattr(m, k, v)
-        return m
+        try:
+            # Built in one call, so __post_init__ checks the finished
+            # profile. (Setting attributes afterwards, as this used to,
+            # would skip the check.)
+            return cls(units=units, **(values | overrides))
+        except MachineConfigError as e:
+            raise MachineConfigError([replace(i, where=where) for i in e.issues]) from None
 
     @classmethod
     def load(cls, path, units: str) -> MachineConfig:
         """Read a machine.toml: top-level keys apply to both units, [inch]/[metric] tables
-        override for one unit system."""
-        import tomllib
-        from pathlib import Path
+        override for one unit system.
 
-        data = tomllib.loads(Path(path).read_text())
-        common = {k: v for k, v in data.items() if not isinstance(v, dict)}
-        return cls.for_units(units, common | data.get(units, {}))
+        Raises MachineConfigError (a ValueError) naming the file, the section
+        and the setting: for a file that can't be read or isn't valid TOML, a
+        table other than [inch]/[metric], an unknown key and any bad value.
+        Both unit sections are checked whichever units the job uses, so a typo
+        under [metric] doesn't wait for the first metric job to be found.
+        """
+        path = Path(path)
+        try:
+            data = tomllib.loads(path.read_text())
+        except OSError as e:
+            raise MachineConfigError([Issue(str(path), f"can't be read: {e.strerror or e}")]) from None
+        except tomllib.TOMLDecodeError as e:
+            raise MachineConfigError([Issue(str(path), f"is not valid TOML: {e}")]) from None
+        common: dict = {}
+        sections: dict[str, dict] = {"inch": {}, "metric": {}}
+        problems: list[Issue] = []
+        for k, v in data.items():
+            if k in sections:
+                if isinstance(v, dict):
+                    sections[k] = v
+                else:
+                    problems.append(Issue(str(path), "must be a table: [inch] or [metric]", setting=k))
+            elif isinstance(v, dict) and k != "arc_codes":
+                problems.append(
+                    Issue(
+                        str(path), "is not a section of machine.toml", "Use [inch] and [metric] only", setting=f"[{k}]"
+                    )
+                )
+            else:
+                common[k] = v
+        problems += cls._key_problems(common, str(path))
+        for name, section in sections.items():
+            problems += cls._key_problems(section, f"{path} [{name}]")
+        built = {}
+        if not problems:
+            for name, section in sections.items():
+                try:
+                    built[name] = cls.for_units(name, common | section)
+                except MachineConfigError as e:
+                    # Point at the section if the bad value is there, else
+                    # at the top of the file.
+                    problems += [
+                        replace(i, where=f"{path} [{name}]" if i.setting in section else str(path)) for i in e.issues
+                    ]
+        if problems:
+            # dict.fromkeys drops duplicates and keeps the order: a bad
+            # top-level value is found once for inch and once for metric.
+            raise MachineConfigError(list(dict.fromkeys(problems)))
+        if units not in built:
+            raise MachineConfigError([Issue(str(path), f"units {units!r}: must be inch or metric")])
+        return built[units]
+
+
+class MachineConfigError(ValidationError):
+    """A machine profile that can't be used. Every Issue names the file (or
+    "machine settings" when built in code) and the setting."""
 
 
 class OmniTurnPost:
@@ -610,6 +766,14 @@ class OmniTurnPost:
                     self.emit(line.strip())
 
     def run(self) -> str:
+        """Validate, then write the whole program. Raises PostError, listing every
+        error, before writing a line if validation finds any (validation.py)."""
+        found = self.job.issues(self.m)
+        errs = [i for i in found if i.severity == "error"]
+        if errs:
+            raise PostError(format_issues(errs))
+        for i in found:
+            self.warn(str(i))
         self.header()
         # enumerate(..., 1) counts from 1, the way the process list numbers operations.
         for i, op in enumerate(self.job.operations, 1):
@@ -620,13 +784,18 @@ class OmniTurnPost:
 
 
 def post(job: Job, machine: MachineConfig | None = None, check: bool = True, warnings: list | None = None) -> str:
-    """Generate the program. Pass a list as `warnings` to collect non-fatal notes."""
+    """Generate the program. Pass a list as `warnings` to collect non-fatal notes.
+
+    Raises PostError for any problem with the job or for a machine profile
+    loaded for the other units; ``run()`` validates against the machine too.
+    """
     try:
+        # Machine-independent checks first: they must pass before the job's
+        # units can even pick a machine profile, and before the include
+        # file is read (OmniTurnPost.__init__).
         job.validate()
     except (KeyError, ValueError) as e:
         raise PostError(str(e).strip('"')) from None
-    if machine is not None and machine.units != job.units:
-        machine = MachineConfig.for_units(job.units, {k: getattr(machine, k) for k in ("name", "max_rpm")})
     p = OmniTurnPost(job, machine)
     code = p.run()
     p.check_travel(code)

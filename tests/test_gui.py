@@ -25,6 +25,13 @@ def app():
 @pytest.fixture
 def win(app, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    # CONFIG_DIR is worked out from the home folder once, when gui.app is
+    # imported, so setting HOME above doesn't move it. Point it at this test's
+    # temporary folder too, or the tests read and write the real
+    # ~/.config/omniturn-cam/machine.toml on whoever's computer runs them.
+    import omniturn_cam.gui.app as app_module
+
+    monkeypatch.setattr(app_module, "CONFIG_DIR", tmp_path / ".config" / "omniturn-cam")
     w = MainWindow(library_path=EX / "tools.toml")
     w.dirty = False
     yield w
@@ -158,3 +165,71 @@ def test_every_operation_form_builds(win):
             assert text == expected[name].label
             assert widget.toolTip() == expected[name].help and expected[name].help.strip()
         form.deleteLater()
+
+
+# ---------------------------------------------------------------- machine profile (Stage 2, issue #32)
+def test_default_machine_profile_is_used_when_nothing_else_is_set(win, tmp_path):
+    """With a fresh HOME the GUI copies the built-in profile to
+    ~/.config/omniturn-cam/machine.toml and posts with it. Also guards the
+    fixture: the tests below break that file on purpose, so it must be the
+    test's own copy and never the real one."""
+    win.open_job(EX / "manual_g75.toml")
+    assert win.machine_path.exists()
+    assert win.machine_path.is_relative_to(tmp_path)
+    assert win.generate() is not None and win.last_error == ""
+
+
+@pytest.mark.parametrize(
+    "text, words",
+    [
+        ("max_rmp = 2500\n", ["max_rmp", "Did you mean max_rpm"]),
+        ('max_rpm = "4000"\n', ["max_rpm is '4000'", "must be a number"]),
+        ("[inch]\nz_clear = nan\n", ["z_clear is nan"]),
+        ("max_rpm = \n", ["not valid TOML"]),
+    ],
+)
+def test_invalid_machine_file_refuses_to_generate(win, text, words):
+    """It used to warn and post with the built-in machine instead: code for a
+    machine other than the one the operator set up. Now nothing is made, F5
+    and F6 say which file and setting, and how to get going again."""
+    win.open_job(EX / "manual_g75.toml")
+    win.machine_path.write_text(text)
+    assert win.generate() is None
+    for w in [str(win.machine_path), "no program was made", "Fix the file", *words]:
+        assert w in win.last_error, win.last_error
+    win.show_screen(5)  # F6 Program: no code to save, the problem shown
+    assert win.screens[5].text.toPlainText() == "" and win.screens[5].code is None
+    assert "no program was made" in win.screens[5].status.text()
+    win.show_screen(0)  # F1 header preview shows the problem instead of crashing
+    assert "can't be used" in win.screens[0].header.toPlainText()
+
+
+def test_unreadable_machine_file_refuses_to_generate(win):
+    win.open_job(EX / "manual_g75.toml")
+    win.machine_path.unlink()
+    assert win.generate() is None and "can't be read" in win.last_error
+
+
+def test_fixing_the_machine_file_takes_effect_at_the_next_check(win):
+    win.open_job(EX / "manual_g75.toml")
+    good = win.machine_path.read_text()
+    win.machine_path.write_text("max_rmp = 1\n")
+    assert win.generate() is None
+    win.machine_path.write_text(good)
+    assert win.generate() is not None
+
+
+# ---------------------------------------------------------------- units and new processes
+def test_changing_units_keeps_values_and_new_processes_use_the_new_units(win):
+    """Changing F1 units relabels fields and never converts numbers already
+    in the job; processes added afterwards start with values for the new units."""
+    win.open_job(EX / "manual_g75.toml")
+    before = [dict(vars(op)) for op in win.job.operations]
+    win.screens[0]._units("metric")
+    assert win.job.units == "metric"
+    assert [dict(vars(op)) for op in win.job.operations] == before
+    win.show_screen(3)
+    win.screens[3].list.setCurrentRow(-1)
+    win.screens[3]._add("face")
+    added = win.job.operations[-1]
+    assert added.feed == 0.08  # mm/rev, not .003

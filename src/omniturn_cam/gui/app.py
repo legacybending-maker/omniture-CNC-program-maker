@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from ..geometry import Point, Profile
 from ..job import Job, Stock, load_job, save_job
 from ..post import MachineConfig, PostError, post
+from ..post.omniturn import MachineConfigError
 from ..tools import Setup, ToolLibrary
 from .screens import CheckScreen, JobScreen, PlateScreen, ProcessScreen, ProgramScreen, ShapeScreen
 from .toollib import ToolLibraryDialog
@@ -211,16 +212,39 @@ class MainWindow(QMainWindow):
 
     @property
     def machine(self) -> MachineConfig:
-        try:
-            return MachineConfig.load(self.machine_path, self.job.units)
-        except (OSError, ValueError) as e:
-            self.warnings = [f"could not read {self.machine_path}: {e}"]
-            return MachineConfig.for_units(self.job.units)
+        """The machine profile, read fresh each time so an edit to the file
+        counts at the next F5/F6. Raises MachineConfigError when it can't be
+        used.
+
+        It used to fall back to the built-in profile with only a warning, so
+        a broken or mistyped machine.toml produced code for a *different*
+        machine. Now nothing is generated until the file is fixed.
+        """
+        return MachineConfig.load(self.machine_path, self.job.units)
+
+    def machine_problem(self, e: MachineConfigError) -> str:
+        """What the operator sees when the machine profile can't be used."""
+        return (
+            f"The machine profile {self.machine_path} can't be used, so no program was made:\n{e}\n"
+            "Fix the file and press F5 again. To go back to the built-in Hardinge HLV-H profile, "
+            "delete the file and restart omniturn-cam."
+        )
 
     def generate(self) -> str | None:
         self.warnings = []
         try:
-            code = post(self.job, self.machine, warnings=self.warnings)
+            # The job's own problems first: a job whose units are misspelt
+            # can't pick a machine section, and that is the job's fault.
+            self.job.validate()
+            machine = self.machine
+        except MachineConfigError as e:
+            self.last_error = self.machine_problem(e)
+            return None
+        except (KeyError, ValueError) as e:
+            self.last_error = str(e).strip('"')
+            return None
+        try:
+            code = post(self.job, machine, warnings=self.warnings)
         except (PostError, KeyError, ValueError) as e:
             self.last_error = str(e).strip('"')
             return None
@@ -322,7 +346,13 @@ def main(argv=None):
     app.setApplicationName("omniturn-cam")
     app.setStyleSheet(STYLE)
     job = Path(argv[1]) if len(argv) > 1 and argv[1].endswith(".toml") else None
-    w = MainWindow(job_path=job)
+    try:
+        w = MainWindow(job_path=job)
+    except ValueError as e:
+        # Almost always the tool library (tools.toml). Starting anyway with an
+        # empty library would let the tool editor save it over the user's file.
+        QMessageBox.critical(None, "omniturn-cam", f"omniturn-cam can't start:\n\n{e}\n\nFix the file and start again.")
+        return 2
     w.show()
     return app.exec()
 

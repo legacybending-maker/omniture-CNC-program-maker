@@ -170,3 +170,67 @@ def test_optional_fields_say_what_blank_means(kind):
             if "blank" not in fi.help.lower():
                 vague.append(f.name)
     assert not vague, f"{kind}: say in the help what leaving these blank does: {vague}"
+
+
+# ---------------------------------------------------------------- starting values per unit system
+# Field kinds whose value is a length or a feed: these change with units.
+UNIT_KINDS = ("dia", "z", "len", "feed", "feed_ipm")
+
+
+@pytest.mark.parametrize("kind", list(SPECS))
+def test_every_inch_length_default_has_a_metric_one(kind):
+    """A new operation in a metric job used to get inch numbers (feed .003,
+    z_end -.25) labelled mm. Any length or feed field with a non-zero inch
+    default needs an entry in its OpSpec.metric_defaults; and every entry there
+    must be a real field (a typo would be silently ignored)."""
+    spec = SPECS[kind]
+    missing = []
+    for f in dataclasses.fields(spec.cls):
+        if info(kind, f.name).kind not in UNIT_KINDS:
+            continue
+        d = f.default
+        if isinstance(d, int | float) and not isinstance(d, bool) and d != 0 and f.name not in spec.metric_defaults:
+            missing.append(f.name)
+    assert not missing, f"{kind}: add metric starting values to OpSpec.metric_defaults for {missing}"
+    names = {f.name for f in dataclasses.fields(spec.cls)}
+    assert set(spec.metric_defaults) <= names, f"{kind}: metric_defaults names a field that doesn't exist"
+
+
+def test_new_operation_defaults_inch_and_metric():
+    from omniturn_cam.fields import new_operation
+
+    face_in, face_mm = new_operation("face", 1), new_operation("face", 1, units="metric")
+    assert (face_in.feed, face_mm.feed) == (0.003, 0.08)
+    axial_in, axial_mm = new_operation("axial", 1), new_operation("axial", 1, units="metric")
+    assert (axial_in.z_start, axial_in.z_end, axial_in.feed) == (0.05, -0.25, 0.003)
+    assert (axial_mm.z_start, axial_mm.z_end, axial_mm.feed) == (1.0, -6.0, 0.08)
+    thread_mm = new_operation("thread", 1, units="metric")
+    assert (thread_mm.major, thread_mm.lead, thread_mm.runup) == (10.0, 1.5, 5.0)
+    assert new_operation("cutoff", 1, units="metric").x_end == -0.25
+    # Unit-free values are the same in both.
+    assert new_operation("thread", 1).rpm == thread_mm.rpm == 500
+
+
+def test_new_operation_overrides_and_tool_params_still_win_in_metric():
+    from omniturn_cam.fields import new_operation
+    from omniturn_cam.tools import Tool
+
+    tap = Tool(id="m6", name="M6 tap", kind="tap", units="metric", params={"pitch": 1.0})
+    assert new_operation("tap", 1, tap, units="metric").pitch == 1.0
+    assert new_operation("face", 1, units="metric", feed=0.12).feed == 0.12
+
+
+def test_new_operation_refuses_unknown_units():
+    from omniturn_cam.fields import new_operation
+
+    with pytest.raises(ValueError, match="inch or metric"):
+        new_operation("face", 1, units="mm")
+
+
+def test_dataclass_defaults_are_unchanged():
+    """Job files that leave a key out get the dataclass default, so those stay
+    inch values; changing them would change what old files mean."""
+    from omniturn_cam.operations.cutoff import Cutoff
+    from omniturn_cam.operations.face import Face
+
+    assert Face(t=1).feed == 0.003 and Cutoff(t=1, z=0, feed=0.002).x_end == -0.010

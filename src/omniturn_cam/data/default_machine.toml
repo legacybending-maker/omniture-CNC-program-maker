@@ -1,5 +1,8 @@
 # Machine profile. Copy to ~/.config/omniturn-cam/machine.toml and edit.
 # Top-level keys apply in both unit systems; [inch] / [metric] override one.
+# Every setting is checked: a misspelt key, a quoted number or a zero or negative
+# limit stops the post with the setting named. x_travel, z_travel or max_bar = 0
+# turns that check off.
 name = "Hardinge HLV-H OmniTurn G4"   # printed as a comment in every program header
 max_rpm = 4000                        # OmniTurn VFD on the HLV-H spindle
 

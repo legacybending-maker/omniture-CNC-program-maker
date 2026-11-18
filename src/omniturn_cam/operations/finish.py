@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -10,6 +11,7 @@ from .base import FieldInfo, Operation, OpSpec
 
 if TYPE_CHECKING:
     from ..post.omniturn import OmniTurnPost
+    from ..validation import CheckContext, Issue
 
 
 @dataclass(kw_only=True)
@@ -36,23 +38,42 @@ FIELDS = {
 }
 
 
+def resolve_comp(op: Finish, prof, nose_radius: float) -> str:
+    """G41/G42/none for this pass: the operator's choice, or for "auto" the
+    side the tool is on relative to the direction of cut (p2.31-2.36)."""
+    if op.comp != "auto":
+        return op.comp
+    if nose_radius <= 0:
+        return "none"
+    toward_chuck = prof.end.z < prof.start.z
+    if prof.side == "od":
+        return "g41" if toward_chuck else "g42"
+    return "g42" if toward_chuck else "g41"
+
+
+def validate(op: Finish, ctx: CheckContext) -> Iterator[Issue]:
+    """Layer 2: a shape to follow, and a D number when comp is on. The D check
+    was a PostError in emit(); it's a setup problem, so it's found here now."""
+    prof = ctx.job.profiles[op.profile]
+    if not prof.segments:
+        yield ctx.error("profile", "has no segments yet", "Draw the shape on F2 Part shape")
+        return  # `return` in a generator just ends it: nothing more to check
+    if ctx.station is not None:
+        comp = resolve_comp(op, prof, ctx.station.tool.nose_radius)
+        if comp != "none" and ctx.station.d is None:
+            yield ctx.error(
+                "comp",
+                f"is {comp}, which needs a D number on station t{op.t} (the secondary offset holding the "
+                "nose radius, p2.35)",
+                "Give the station a D number on F3 Tool plate, or set comp to none",
+            )
+
+
 def emit(p: OmniTurnPost, op: Finish) -> None:
     prof = p.job.profiles[op.profile]
     st = p.station(op)
     sx, sz = p.start_point(op, prof)
-    comp = op.comp
-    toward_chuck = prof.end.z < prof.start.z
-    if comp == "auto":
-        if st.tool.nose_radius <= 0:
-            comp = "none"
-        elif prof.side == "od":
-            comp = "g41" if toward_chuck else "g42"
-        else:
-            comp = "g42" if toward_chuck else "g41"
-    if comp != "none" and st.d is None:
-        raise PostError(
-            f"t{op.t} finish with {comp}: give this station a d number (secondary offset holding the nose radius)"
-        )
+    comp = resolve_comp(op, prof, st.tool.nose_radius)
     p.call_tool(op, sx, p.job.stock.diameter)
     p.rapid(x=sx)
     p.rapid(z=sz)
@@ -84,4 +105,6 @@ SPEC = OpSpec(
     emit=emit,
     tool_kinds=("turn", "bore"),
     fields=FIELDS,
+    metric_defaults={"feed": 0.05},
+    validate=validate,
 )

@@ -21,6 +21,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Literal
 
+from .validation import Issue, is_finite, raise_errors, show
+
 ArcDir = Literal["cw", "ccw"]
 
 
@@ -107,17 +109,136 @@ class Profile:
             yield cur, seg
             cur = seg.end
 
-    def validate(self) -> None:
-        segs = self.segments
-        for i, (p0, seg) in enumerate(self.points()):
+    def issues(self) -> list[Issue]:
+        """Every problem with the shape, as Issues (validation.py); raises nothing.
+
+        Checked in two passes. First the numbers themselves (finite, C/R and
+        arc radii positive): the geometry pass divides by lengths and takes
+        angles, and a NaN or a string there would raise ZeroDivisionError or
+        TypeError instead of saying what's wrong. Then the geometry: segments
+        that go nowhere, arcs that can't reach, and C/R corners that don't fit
+        the lines they sit on (manual p2.14-2.15).
+
+        No coordinate gets a sign rule: X is a diameter and Z runs negative
+        toward the chuck, and both can legitimately be anything.
+        """
+        where = f"shape {self.name!r}"
+        out: list[Issue] = []
+
+        def bad(setting: str, value, problem: str, fix: str = "", raw: bool = False) -> None:
+            # raw=True: `value` is already text for the message (a point
+            # like "x.75 z-.2"), so show() mustn't put quotes round it.
+            out.append(Issue(where, problem, fix, setting=setting, value=value if raw else show(value)))
+
+        if self.side not in ("od", "id"):
+            bad("side", self.side, "must be od or id")
+        for i, pt in enumerate([self.start] + [seg.end for seg in self.segments]):
+            label = "start" if i == 0 else f"segment {i}"
+            for axis in ("x", "z"):
+                v = getattr(pt, axis)
+                if not is_finite(v):
+                    bad(f"{label} {axis}", v, "must be a finite number")
+        for i, seg in enumerate(self.segments, 1):
             if isinstance(seg, Arc):
-                seg.center(p0)  # raises if impossible
-            elif seg.chamfer or seg.radius:
-                if i + 1 >= len(segs) or not isinstance(segs[i + 1], Line):
-                    raise ValueError(
-                        "C/R corners only blend two straight lines (OmniTurn rule, manual p2.14); "
-                        f"segment {i + 1} ends at x{seg.end.x} z{seg.end.z}"
-                    )
+                if not is_finite(seg.radius) or seg.radius <= 0:
+                    bad(f"segment {i} arc radius", seg.radius, "must be a number greater than zero")
+                if seg.direction not in ("cw", "ccw"):
+                    bad(f"segment {i} arc direction", seg.direction, "must be cw or ccw")
+            elif isinstance(seg, Line):
+                for word, v in (("C", seg.chamfer), ("R", seg.radius)):
+                    # None and 0 both mean "no corner": the job file and the
+                    # post (`if seg.chamfer`) have always read 0 that way.
+                    if v is None:
+                        continue
+                    if not is_finite(v) or v < 0:
+                        bad(f"segment {i} corner {word}", v, "must be a number greater than zero, or blank")
+            else:
+                bad(f"segment {i}", seg, "must be a line or an arc")
+        if out:
+            return out
+
+        segs = self.segments
+        # Where each segment begins: the start, then each segment's end. The
+        # slice [: len(segs)] drops the last end, which begins nothing.
+        starts = ([self.start] + [seg.end for seg in segs])[: len(segs)]
+        for i, (p0, seg) in enumerate(zip(starts, segs, strict=True), 1):
+            if abs(seg.end.x - p0.x) < 1e-9 and abs(seg.end.z - p0.z) < 1e-9:
+                bad(
+                    f"segment {i}",
+                    f"x{seg.end.x:g} z{seg.end.z:g}",
+                    "ends where it starts, so it goes nowhere",
+                    "Delete it",
+                    raw=True,
+                )
+            elif isinstance(seg, Arc):
+                try:
+                    seg.center(p0)  # raises ValueError when the radius can't span the chord
+                except ValueError as e:
+                    bad(f"segment {i}", f"an arc r{seg.radius:g}", str(e), raw=True)
+        if out:
+            return out
+
+        # C/R corners. A corner on line i blends it into line i+1 (p2.14):
+        # the blend starts `setback` before the sharp corner on line i and
+        # ends `setback` after it on line i+1. A chamfer's setback is its size
+        # (corner_blend: "distance back from the corner along each line"); a
+        # radius's is r / tan(angle / 2), the tangent length.
+        setback_end = [0.0] * len(segs)  # used up at the end of each line
+        for i, seg in enumerate(segs):
+            if not isinstance(seg, Line) or not (seg.chamfer or seg.radius):
+                continue
+            n = i + 1  # the operator's 1-based segment number
+            word = "C" if seg.chamfer else "R"
+            if i + 1 >= len(segs) or not isinstance(segs[i + 1], Line):
+                bad(
+                    f"segment {n} corner {word}",
+                    seg.chamfer or seg.radius,
+                    "C/R corners only blend two straight lines (OmniTurn rule, manual p2.14)",
+                    "Use an arc segment instead, or put the corner where two lines meet",
+                )
+                continue
+            a = (starts[i].z - seg.end.z, starts[i].r - seg.end.r)  # back along this line
+            b = (segs[i + 1].end.z - seg.end.z, segs[i + 1].end.r - seg.end.r)  # on along the next
+            la, lb = math.hypot(*a), math.hypot(*b)
+            cos = (a[0] * b[0] + a[1] * b[1]) / (la * lb)
+            if cos < -1 + 1e-9:
+                bad(
+                    f"segment {n} corner {word}",
+                    seg.chamfer or seg.radius,
+                    f"has no corner to blend: segments {n} and {n + 1} are in a straight line",
+                    "Remove the C/R",
+                )
+                continue
+            if cos > 1 - 1e-9:
+                bad(
+                    f"segment {n} corner {word}",
+                    seg.chamfer or seg.radius,
+                    f"can't be blended: segment {n + 1} doubles back along segment {n}",
+                )
+                continue
+            # max/min keep acos inside its domain if rounding nudges cos past 1.
+            angle = math.acos(max(-1.0, min(1.0, cos)))
+            setback_end[i] = seg.chamfer if seg.chamfer else seg.radius / math.tan(angle / 2)
+        for i, seg in enumerate(segs):
+            if not isinstance(seg, Line):
+                continue
+            at_start = setback_end[i - 1] if i > 0 and isinstance(segs[i - 1], Line) else 0.0
+            used = at_start + setback_end[i]
+            length = math.hypot(seg.end.z - starts[i].z, seg.end.r - starts[i].r)
+            if used > length + 1e-9:
+                bad(
+                    f"segment {i + 1}",
+                    f"{length:.4g} long",
+                    f"is too short for its corners: they need {used:.4g} of it "
+                    f"({at_start:.4g} at its start, {setback_end[i]:.4g} at its end)",
+                    "Make the chamfer or radius smaller. X is a diameter: a step in X is half the X difference long",
+                    raw=True,
+                )
+        return out
+
+    def validate(self) -> None:
+        """Raise ValidationError (a ValueError) listing every problem in issues()."""
+        raise_errors(self.issues())
 
     def undercut_z(self, tol: float = 1e-4) -> float | None:
         """Z where the shape first turns back toward the face (+Z) after heading toward
