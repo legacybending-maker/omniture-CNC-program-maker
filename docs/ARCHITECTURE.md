@@ -131,6 +131,32 @@ tools (`Tool.issues`, run when a `Tool` is made) and machine profiles
 file and section) use the same `Issue`. A machine profile the operator asked
 for (`--machine`, or their ~/.config file) that can't be used is always fatal.
 
+## Units
+
+A `Job` has one `units` (`"inch"` or `"metric"`), and every number in it
+(stock, profiles, operation fields) is in those units. The core never
+converts a stored value. `job.units` decides:
+
+- which `MachineConfig` section applies (`MachineConfig.load(path, units)`
+  picks `[inch]` or `[metric]`; `Job.issues` refuses a profile loaded for the
+  other units),
+- G70/G71 in the program and the scale of every unit-dependent constant (the
+  sfm→rpm factor, `CheckContext.per_unit` thresholds, the control's feed
+  limits),
+- the starting values of new operations (`new_operation(..., units=)`,
+  `OpSpec.metric_defaults`) and the GUI's unit labels (`gui/widgets.py`
+  `UNIT_SUFFIX`).
+
+Changing F1 units sets `job.units` and nothing else
+(`tests/test_gui.py`, `test_changing_units_keeps_values_and_new_processes_use_the_new_units`).
+Converting silently would change numbers the operator typed without telling
+them (CONTRIBUTING.md, "Usability"). The only conversion is at the edge:
+model import (`stepimport.finish_loop`) turns model millimetres into the
+job's units once, when the shape is made. `Tool.units` is stored but not
+used, so tool library values (nose radius, diameter, `pitch`) are taken in
+the job's units as written. What this means for the operator is in the
+README, "Inch and metric".
+
 ## Where machine facts live
 
 - `docs/omniturn-post-rules.md`: the G4 dialect, with manual page references

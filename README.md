@@ -82,6 +82,53 @@ spindle-synced axial pass at .05 IPR.
 Your tool library lives in `~/.config/omniturn-cam/tools.toml`. A starter
 library is copied there the first time the program runs.
 
+## Inch and metric
+
+A job is either inch or metric (**F1 Units**, saved as `units` in the job
+file; a job file without it is inch). Every number in the job (bar size,
+shape, every process value) is stored and used in the job's units. The
+program never converts them.
+
+**Changing F1 Units on a job that already has values:**
+
+| Changes | Stays exactly as typed |
+|---|---|
+| The unit labels next to every field (in → mm, in/rev → mm/rev, sfm → m/min) | Bar diameter, length and bore |
+| Which section of machine.toml applies (`[inch]` or `[metric]`), so the limits, clearances and decimals come from the other section | Every point and radius of the shapes on F2 |
+| The program header: G70 (inch) or G71 (metric), manual p2.37 | Every value in the processes on F4 |
+| Starting values for processes you add **after** the change (metric: feeds like .08 mm/rev, lengths in mm) | Tool library values: nose radius, drill diameter, tap pitch, blade width |
+
+So an inch job switched to metric still says `.003` for a feed, `-.5` for a
+Z and `400` for a surface speed, now read as **.003 mm/rev**, **-.5 mm** and
+**400 m/min**: the part comes out 25.4 times too small, and a CSS process
+asks for about 80 times the spindle speed you meant (400 m/min on a diameter
+that is now in mm), so in practice it runs at the CSS max RPM, or the
+machine's top speed if that's blank. The other way round, the part comes out
+25.4 times too big.
+
+**The check won't save you here.** Small numbers are legal metric values, so
+most of an unconverted job passes. Trying it on the example jobs: two posted
+a complete program without a single error, and the other two were refused
+only by chance (one feed fell below the metric minimum, one arc stopped
+fitting at 3 decimals).
+
+What to do instead:
+
+- **Pick the units before you enter anything.** Changing units on an empty
+  job is fine.
+- **To switch a finished job,** convert every number yourself (inch × 25.4 =
+  mm; mm ÷ 25.4 = inch) on F1, F2 and F4, or start a new job in the other
+  units and re-import the model. Then check the backplot on F5 against the
+  print.
+- **Use a tool library in the job's units.** Tools have a units setting, but
+  the program doesn't use it to convert anything: an inch nose radius of
+  `.0156` in a metric job is taken as .0156 mm.
+
+**Model import is the exception.** STEP, STL and 3MF files are converted to
+the job's units at the moment you import them (the FreeCAD workbench and
+`omniturn-cam step --units` the same way). A shape imported before you change
+units isn't converted afterwards.
+
 ## Importing a STEP, STL or 3MF file
 
 On **F2 Part Shape**, press **Import from model…** and pick the file.
