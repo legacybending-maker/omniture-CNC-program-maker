@@ -51,6 +51,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions:
   RPM (no G76 line), CSS max RPM (the machine's max), peck retract Z (the start
   Z), thread taper (straight thread). Placeholders match. No change to any
   program.
+- README "Inch and metric" (#34): what changing F1 units does to a job that
+  already has values (nothing is converted, and most unconverted values still
+  pass the check), what to do instead, and that tool library values are used
+  as written. Docs only; no change to any program.
 
 ### Fixed
 - **machine.toml is checked strictly.** A misspelt setting (`max_rmp`), a
