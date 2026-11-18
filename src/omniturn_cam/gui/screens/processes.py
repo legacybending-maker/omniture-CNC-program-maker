@@ -102,7 +102,7 @@ class ProcessScreen(Screen):
             overrides["profile"] = sorted(self.job.profiles)[0]
         if kind == "cutoff":
             overrides["x_start"] = None
-        op = new_operation(kind, st.t, st.tool, **overrides)
+        op = new_operation(kind, st.t, st.tool, units=self.job.units, **overrides)
         at = self.list.currentRow() + 1 if self.list.currentRow() >= 0 else len(self.job.operations)
         self.job.operations.insert(at, op)
         self.win.touched()

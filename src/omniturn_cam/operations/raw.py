@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -9,6 +10,7 @@ from .base import FieldInfo, Operation, OpSpec
 
 if TYPE_CHECKING:
     from ..post.omniturn import OmniTurnPost
+    from ..validation import CheckContext, Issue
 
 
 @dataclass(kw_only=True)
@@ -33,6 +35,14 @@ class RawCode(Operation):
 FIELDS = {
     "code": FieldInfo("Program lines", "multiline", "Copied into the program as written, then rules-checked"),
 }
+
+
+def validate(op: RawCode, ctx: CheckContext) -> Iterator[Issue]:
+    """Layer 2. An empty block would still park the slide and make the post
+    forget the spindle, coolant and tool (resume_after), for nothing: almost
+    always a process added and never filled in."""
+    if not op.code.strip():
+        yield ctx.error("code", "has no program lines", "Type the lines, or delete this process")
 
 
 def emit(p: OmniTurnPost, op: RawCode) -> None:
@@ -64,4 +74,5 @@ SPEC = OpSpec(
     emit=emit,
     fields=FIELDS,
     summary=summary,
+    validate=validate,
 )

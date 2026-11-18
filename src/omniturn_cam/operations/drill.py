@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -9,7 +10,8 @@ from ..gcode import fmt
 from .base import FieldInfo, Operation, OpSpec
 
 if TYPE_CHECKING:
-    from ..post.omniturn import OmniTurnPost
+    from ..post.omniturn import MachineConfig, OmniTurnPost
+    from ..validation import CheckContext, Issue
 
 
 @dataclass(kw_only=True)
@@ -45,6 +47,38 @@ FIELDS = {
 }
 
 
+def validate(op: Drill, ctx: CheckContext) -> Iterator[Issue]:
+    """Layer 2. G81 and G83 feed from the start toward the chuck (-Z) and
+    rapid back to the start (p2.48-2.50), so the depth must be below the start
+    and the peck retract plane above the depth. This is the drill's own
+    direction rule, not a rule for every operation."""
+    if op.peck is not None and op.peck <= 0:
+        # emit() tests `if op.peck:`, so 0 used to turn a peck drill into a
+        # straight G81 without a word. Blank is how to ask for that.
+        yield ctx.error("peck", "must be greater than zero", "Leave it blank for a straight G81 drill")
+    if op.peck_clearance < 0:
+        # C is how far short of the last depth the drill stops on the way
+        # back in; negative would rapid into metal it hasn't cut yet.
+        yield ctx.error("peck_clearance", "can't be negative: the drill would rapid into uncut metal (p2.49)")
+    if op.start_z is not None and op.z >= op.start_z:
+        yield ctx.error(
+            "z",
+            f"must be below the start Z {op.start_z:g}: the drill feeds toward the chuck (-Z) from its start (p2.48)",
+        )
+    if op.retract_z is not None and op.retract_z <= op.z:
+        yield ctx.error("retract_z", f"must be above the drill depth Z {op.z:g}: G83 rapids out to it (p2.49)")
+
+
+def validate_machine(op: Drill, ctx: CheckContext, m: MachineConfig) -> Iterator[Issue]:
+    """Layer 3: a blank start Z is the clearance from machine.toml."""
+    if op.start_z is None and op.z >= m.z_clear:
+        yield ctx.error(
+            "z",
+            f"must be below the automatic start Z {m.z_clear:g} (z_clear in machine.toml): the drill feeds "
+            "toward the chuck (p2.48)",
+        )
+
+
 def emit(p: OmniTurnPost, op: Drill) -> None:
     sz = op.start_z if op.start_z is not None else p.m.z_clear
     p.call_tool(op, 0.0, p.station(op).tool.diameter or p.job.stock.diameter)
@@ -77,4 +111,7 @@ SPEC = OpSpec(
     tool_kinds=("center_drill", "spot_drill", "drill"),
     fields=FIELDS,
     summary=summary,
+    metric_defaults={"feed": 0.08, "peck_clearance": 0.5},
+    validate=validate,
+    validate_machine=validate_machine,
 )

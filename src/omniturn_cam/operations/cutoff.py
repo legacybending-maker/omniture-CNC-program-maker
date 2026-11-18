@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -10,7 +11,8 @@ from .radial import RadialPass
 from .radial import emit as emit_radial
 
 if TYPE_CHECKING:
-    from ..post.omniturn import OmniTurnPost
+    from ..post.omniturn import MachineConfig, OmniTurnPost
+    from ..validation import CheckContext, Issue
 
 
 @dataclass(kw_only=True)
@@ -32,6 +34,24 @@ FIELDS = {
 }
 
 
+def validate(op: Cutoff, ctx: CheckContext) -> Iterator[Issue]:
+    """Layer 2. A cutoff blade only feeds in toward the centre."""
+    if op.x_start is not None and op.x_end >= op.x_start:
+        yield ctx.error(
+            "x_end", f"must be below the start diameter {op.x_start:g}: a cutoff feeds in toward the centre"
+        )
+    elif op.x_end > 0:
+        # Legal, and sometimes meant (leave a pip to break off), so a warning.
+        yield ctx.warning("x_end", "is above centre, so the part won't come off", "Use just past centre, e.g. -.01")
+
+
+def validate_machine(op: Cutoff, ctx: CheckContext, m: MachineConfig) -> Iterator[Issue]:
+    """Layer 3: a blank start diameter is the bar plus the machine's X clearance."""
+    sx = ctx.job.stock.diameter + 2 * m.x_clear
+    if op.x_start is None and op.x_end >= sx:
+        yield ctx.error("x_end", f"must be below the automatic start diameter {sx:g} (bar plus x_clear)")
+
+
 def emit(p: OmniTurnPost, op: Cutoff) -> None:
     emit_radial(p, op)
     if op.stop_spindle_after:
@@ -51,4 +71,7 @@ SPEC = OpSpec(
     tool_kinds=("cutoff",),
     fields=FIELDS,
     summary=summary,
+    metric_defaults={"x_end": -0.25},
+    validate=validate,
+    validate_machine=validate_machine,
 )

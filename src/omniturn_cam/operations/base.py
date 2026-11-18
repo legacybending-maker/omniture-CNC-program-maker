@@ -4,13 +4,14 @@ registers. See operations/__init__.py and docs/ARCHITECTURE.md."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from ..post.omniturn import OmniTurnPost
+    from ..post.omniturn import MachineConfig, OmniTurnPost
     from ..tools import Tool
+    from ..validation import CheckContext, Issue
 
 
 # Where the slide is after raw program lines or a called subroutine, as the
@@ -71,3 +72,20 @@ class OpSpec:
     summary: Callable[[Operation], list[str]] | None = None  # extra words for the process list
     tool_defaults: Callable[[Tool, dict], None] | None = None  # pre-fill a new op from its tool
     default_rpm: float = 1500  # starting rpm for a new op
+    # Starting values for a new operation in a metric job, for every field whose
+    # dataclass default is an inch length or feed (fields.new_operation). The
+    # dataclass defaults stay inch: a hand-written job file that leaves a key
+    # out gets the dataclass default, and changing those would change what old
+    # files mean (CONTRIBUTING: Compatibility). tests/test_operations.py fails
+    # if a length or feed field with an inch default has no metric entry here.
+    metric_defaults: Mapping[str, Any] = field(default_factory=dict)
+    # Validation layer 2: rules about this operation on its own, independent
+    # of the machine (a drill depth past its start, a thread minor larger than
+    # its major). Yields one Issue per problem; runs only when every field
+    # already has a value of the right type (layer 1, validation.py).
+    validate: Callable[[Operation, CheckContext], Iterable[Issue]] | None = None
+    # Validation layer 3: rules that need the machine profile (a feed over the
+    # control's maximum at this rpm, a default start that comes from machine
+    # clearances). Kept apart from `validate` so a rule about the part can
+    # never quietly depend on machine.toml.
+    validate_machine: Callable[[Operation, CheckContext, MachineConfig], Iterable[Issue]] | None = None

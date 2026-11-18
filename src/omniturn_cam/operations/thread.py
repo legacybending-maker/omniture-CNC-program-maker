@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from ..gcode import PostError, fmt
+from ..gcode import fmt
 from .base import FieldInfo, Operation, OpSpec
 
 if TYPE_CHECKING:
-    from ..post.omniturn import OmniTurnPost
+    from ..post.omniturn import MachineConfig, OmniTurnPost
+    from ..validation import CheckContext, Issue
 
 
 @dataclass(kw_only=True)
@@ -105,43 +107,94 @@ def thread_plan(op: Thread) -> dict:
     }
 
 
-def emit(p: OmniTurnPost, op: Thread) -> None:
-    inch = p.job.units == "inch"
+def validate(op: Thread, ctx: CheckContext) -> Iterator[Issue]:
+    """Layer 2: a thread that can be cut at all, whatever the machine.
+
+    Until Stage 2 these checks sat at the top of emit(), so they ran only
+    when the program was being written and only one at a time. They run
+    with the rest of validation now (opcheck.py), before any code exists.
+    This is a *generator*: each ``yield`` hands one problem back and carries
+    on, so one pass reports everything that's wrong with the thread.
+    """
     if not op.rpm or op.sfm:
-        raise PostError(f"T{op.t} thread: threading needs a fixed RPM (G97), not surface speed")
-    if op.first_depth <= 0 or op.lead <= 0 or op.starts < 1:
-        raise PostError(f"T{op.t} thread: lead, starts and first-pass depth must be positive")
-    if op.infeed_angle is not None and not 0 <= op.infeed_angle <= 30:
-        raise PostError(f"T{op.t} thread: infeed angle must be 0-30 degrees (manual p2.24)")
-    plan = thread_plan(op)
-    k = plan["k"]
-    feed_limit = p.m.rapid_feed
-    if op.rpm * k > feed_limit + 1e-9:
-        raise PostError(
-            f"T{op.t} thread: {op.rpm:g} rpm x {k:g} lead = {op.rpm * k:g} "
-            f"{'ipm' if inch else 'mm/min'}, over the {feed_limit:g} limit. "
-            f"Slow the spindle to {int(feed_limit / k)} rpm or less (p2.23)"
+        # G33's K is per spindle rev; CSS would change the rpm with the
+        # diameter between passes and the passes wouldn't line up.
+        field = "sfm" if op.sfm else "rpm"
+        yield ctx.error(
+            field, "threading needs a fixed RPM (G97), not surface speed", "Give the RPM; leave surface speed blank"
         )
-    min_runup = 0.1 if inch else 2.5
-    if op.runup < min_runup:
-        p.warn(
-            f"T{op.t} thread: run-up {op.runup:g} is short; the manual says start at least "
-            f"{min_runup:g} away so the slide reaches speed, more for coarse leads or high rpm"
+    if op.lead <= 0:
+        yield ctx.error("lead", "must be greater than zero", "Lead per rev: 1/TPI, or the pitch in mm")
+    if op.starts < 1:
+        yield ctx.error("starts", "must be 1 or more")
+    if op.first_depth <= 0:
+        yield ctx.error("first_depth", "must be greater than zero (the control works out the passes from it, p2.25)")
+    if op.spring_passes < 0:
+        yield ctx.error("spring_passes", "can't be negative", "0 for none")
+    if op.infeed_angle is not None and not 0 <= op.infeed_angle <= 30:
+        yield ctx.error("infeed_angle", "must be 0-30 degrees (manual p2.24)", "Leave it blank to feed straight in")
+    if op.major <= op.minor:
+        # thread_plan() takes abs(major - minor), so swapped diameters would
+        # otherwise give a believable depth on the wrong side of the work.
+        yield ctx.error("minor", f"must be smaller than the major diameter {op.major:g}", "Check they aren't swapped")
+    if op.runup <= 0:
+        yield ctx.error("runup", "must be greater than zero: the slide needs a run-up to reach speed (p2.23)")
+    elif op.runup < ctx.per_unit(0.1, 2.5):
+        yield ctx.warning(
+            "runup",
+            f"is shorter than the {ctx.per_unit(0.1, 2.5):g} the manual asks for so the slide reaches speed "
+            "(p2.23); more for coarse leads or high rpm",
+        )
+    if op.z_end >= op.z_start:
+        # emit() adds the run-up in +Z and offsets extra starts in +Z, so it
+        # cuts toward the chuck for both OD and ID threads.
+        yield ctx.error(
+            "z_end",
+            f"must be below the thread start Z {op.z_start:g}: G33 cuts toward the chuck (-Z), "
+            "starting the run-up in front of the start Z",
         )
     if op.taper_a is not None and op.start_x is None:
-        raise PostError(
-            f"T{op.t} thread: give the start X for a tapered thread "
-            "(the manual corrects the start for the taper over the run-up)"
+        yield ctx.error(
+            "start_x",
+            "is needed for a tapered thread (the manual corrects the start for the taper over the run-up, p2.29)",
         )
-    # OD threads cut down toward the minor, ID threads out toward the major: the
-    # start has to be on the far side of the finished X or G33 has nothing to cut.
-    already_past = (op.side == "od" and plan["start_x"] <= plan["final_x"]) or (
-        op.side == "id" and plan["start_x"] >= plan["final_x"]
-    )
-    if already_past:
-        raise PostError(
-            f"T{op.t} thread: start X {plan['start_x']:g} is already past the finished X {plan['final_x']:g}"
+    if op.major > op.minor and op.first_depth > 0:
+        plan = thread_plan(op)
+        # OD threads cut down toward the minor, ID threads out toward the major:
+        # the start has to be on the far side of the finished X or G33 has
+        # nothing to cut (or cuts the wrong way).
+        already_past = (op.side == "od" and plan["start_x"] <= plan["final_x"]) or (
+            op.side == "id" and plan["start_x"] >= plan["final_x"]
         )
+        if already_past:
+            given = op.start_x is not None
+            yield ctx.error(
+                "start_x" if given else "first_depth",
+                f"start X {plan['start_x']:g} is already past the finished X {plan['final_x']:g}",
+                "Put the start X on the uncut side of the thread"
+                if given
+                else "The first pass is deeper than the thread; make I smaller",
+            )
+
+
+def validate_machine(op: Thread, ctx: CheckContext, m: MachineConfig) -> Iterator[Issue]:
+    """Layer 3: rpm x K is the feed per minute while threading, and it must stay
+    within the machine's maximum feed (p2.23). Moved from emit() unchanged."""
+    k = thread_plan(op)["k"]
+    if op.rpm * k > m.rapid_feed + 1e-9:
+        unit = "ipm" if ctx.inch else "mm/min"
+        yield ctx.error(
+            "rpm",
+            f"{op.rpm:g} rpm x {k:g} lead = {op.rpm * k:g} {unit}, over the {m.rapid_feed:g} limit (p2.23)",
+            f"Slow the spindle to {int(m.rapid_feed / k)} rpm or less",
+        )
+
+
+def emit(p: OmniTurnPost, op: Thread) -> None:
+    # Every check that used to be here is in validate()/validate_machine()
+    # above; the post runs them before it writes anything (OmniTurnPost.run).
+    plan = thread_plan(op)
+    k = plan["k"]
 
     sx = plan["start_x"]
     clear_x = p.stock_x if op.side == "od" else min(sx, op.minor) - 2 * op.first_depth
@@ -190,4 +243,16 @@ SPEC = OpSpec(
     fields=FIELDS,
     summary=summary,
     default_rpm=500,
+    # M10 x 1.5 (minor 8.16): the metric counterpart of the inch defaults.
+    # Run-up 5 mm is past the 2.5 mm minimum.
+    metric_defaults={
+        "major": 10.0,
+        "minor": 8.16,
+        "z_end": -12.0,
+        "lead": 1.5,
+        "first_depth": 0.4,
+        "runup": 5.0,
+    },
+    validate=validate,
+    validate_machine=validate_machine,
 )

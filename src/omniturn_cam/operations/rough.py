@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -9,6 +10,7 @@ from .base import FieldInfo, Operation, OpSpec
 
 if TYPE_CHECKING:
     from ..post.omniturn import OmniTurnPost
+    from ..validation import CheckContext, Issue
 
 
 @dataclass(kw_only=True)
@@ -36,6 +38,18 @@ FIELDS = {
         group="Shape",
     ),
 }
+
+
+def validate(op: Rough, ctx: CheckContext) -> Iterator[Issue]:
+    """Layer 2. The quadrant rule (p2.42) needs the cycle start, which can come
+    from machine clearances, so it stays in emit() with the start point."""
+    if not ctx.job.profiles[op.profile].segments:
+        yield ctx.error("profile", "has no segments yet", "Draw the shape on F2 Part shape")
+    if op.cycle == "g75" and op.depth <= 0:
+        yield ctx.error("depth", "must be greater than zero (G75 I is the depth per pass, p2.41)")
+    if op.u < 0:
+        # U is stock *left*: negative would rough past the finished shape.
+        yield ctx.error("u", "can't be negative: it's the stock left for finishing", "0 to rough to size")
 
 
 def emit(p: OmniTurnPost, op: Rough) -> None:
@@ -76,4 +90,6 @@ SPEC = OpSpec(
     tool_kinds=("turn", "bore"),
     fields=FIELDS,
     summary=summary,
+    metric_defaults={"depth": 0.5, "u": 0.15, "feed": 0.08},
+    validate=validate,
 )

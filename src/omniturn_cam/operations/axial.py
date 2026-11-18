@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -10,6 +11,7 @@ from .base import FieldInfo, Operation, OpSpec
 if TYPE_CHECKING:
     from ..post.omniturn import OmniTurnPost
     from ..tools import Tool
+    from ..validation import CheckContext, Issue
 
 
 @dataclass(kw_only=True)
@@ -48,6 +50,14 @@ FIELDS = {
         "m05 before the stop so the operator isn't reaching past a turning spindle; the next cut restarts it",
     ),
 }
+
+
+def validate(op: AxialPass, ctx: CheckContext) -> Iterator[Issue]:
+    """Layer 2. Only "the feed has to go somewhere": box tools and reamers feed
+    toward the chuck, but a back-facing or pull-cut tool feeds the other way,
+    so the direction is the operator's call."""
+    if op.z_end == op.z_start:
+        yield ctx.error("z_end", "is the same as the start Z: the tool wouldn't move")
 
 
 def emit(p: OmniTurnPost, op: AxialPass) -> None:
@@ -98,4 +108,5 @@ SPEC = OpSpec(
     fields=FIELDS,
     summary=summary,
     tool_defaults=tool_defaults,
+    validate=validate,
 )

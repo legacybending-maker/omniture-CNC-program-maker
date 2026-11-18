@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -9,6 +10,7 @@ from .base import FieldInfo, Operation, OpSpec
 
 if TYPE_CHECKING:
     from ..post.omniturn import OmniTurnPost
+    from ..validation import CheckContext, Issue
 
 
 @dataclass(kw_only=True)
@@ -29,6 +31,14 @@ class CallSub(Operation):
 FIELDS = {
     "sub": FieldInfo("Subroutine number", "int", "M98 P number - must exist below M30 (e.g. in the include file)"),
 }
+
+
+def validate(op: CallSub, ctx: CheckContext) -> Iterator[Issue]:
+    """Layer 2: a subroutine number the control can have (``}n``, p2.55).
+    Whether that subroutine exists below M30 is the rules check's job
+    (lint.py: "called but never defined")."""
+    if op.sub < 1:
+        yield ctx.error("sub", "must be 1 or more")
 
 
 def emit(p: OmniTurnPost, op: CallSub) -> None:
@@ -61,4 +71,5 @@ SPEC = OpSpec(
     emit=emit,
     fields=FIELDS,
     summary=summary,
+    validate=validate,
 )

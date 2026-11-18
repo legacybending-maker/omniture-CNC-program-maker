@@ -60,6 +60,8 @@ The only kernel-specific calls are the three in `kernels/`:
 | `ops.py` | The operation classes under their old import path (re-exports `operations/`) |
 | `fields.py` | Labels, units and help text for the fields several operations share; builds `OP_MENU`, `OP_TOOL_KINDS` and `OVERRIDES` from the specs. The GUI builds its forms from this |
 | `gcode.py` | Number format, comment rules and `PostError`, shared by the post and the operations |
+| `validation.py` | The validation vocabulary: `Issue`, `ValidationError`, type checks from type hints, the per-quantity rules (feeds > 0...), `CheckContext`. Imports nothing from the project (the operation modules import it while `operations/` is loading) |
+| `opcheck.py` | Runs the three validation layers over a job's operations; called by `Job.issues()` |
 | `tools.py` | Tool library (`tools.toml`) and the tool plate (`Setup` of `Station`s, with D offsets) |
 | `job.py` | `Job`: units, stock, setup, named profiles, ordered operations. Reads/writes job TOML, `JOB_FORMAT` version |
 | `post/omniturn.py` | `MachineConfig` (machine.toml) and `OmniTurnPost`: header/footer, motion and tool-call helpers the operations use, the mode-establishing helpers, the handoff to raw code and M98 (`park_before_handoff`, `resume_after`), subroutines below M30. Dispatches each operation to its spec's `emit` |
@@ -99,6 +101,36 @@ These hold for every program the post writes. Each has a test.
    (`docs/omniturn-post-rules.md`, "Handing control to code the post didn't
    write"; `tests/test_post.py`).
 
+## Validation
+
+Nothing reaches G-code generation until it has been checked. `Job.issues(machine)`
+returns every problem as an `Issue` (where, setting, value, problem, fix,
+error or warning); `Job.validate()` raises `ValidationError` (a `ValueError`)
+listing all the errors. The post runs it in `post()` and again in
+`OmniTurnPost.run()` with the machine, and refuses with `PostError` before
+writing a line. Three layers, kept apart:
+
+1. **Scalar and type** (`validation.py`, generic). Each field's type hint
+   decides its type (float must be finite, int must be whole and not a bool,
+   bool must be a bool, `Literal` must be one of its choices, `X | None` may be
+   blank). The field's `FieldInfo.kind` adds the rule for its quantity: rpm,
+   sfm and feeds > 0, seconds ≥ 0, stations 1-32. Coordinates get no sign
+   rule. A new operation is covered without writing anything.
+2. **Operation geometry** (`OpSpec.validate`, one per module). Rules about the
+   operation itself on any machine: a drill depth below its start, a thread
+   minor below its major, a cutoff feeding inward. Direction rules belong to
+   the operation that has them, never to all of them.
+3. **Machine** (`OpSpec.validate_machine`, plus checks every operation shares
+   in `opcheck.py`). Feeds against the control's range at this rpm, CSS limits
+   against `max_rpm`, defaults that come from machine.toml clearances. Runs
+   only when layers 1-2 found no errors in that operation.
+
+Shapes (`Profile.issues`), the job itself (name, units, stock, stations),
+tools (`Tool.issues`, run when a `Tool` is made) and machine profiles
+(`MachineConfig.issues`, run when one is made; `MachineConfig.load` adds the
+file and section) use the same `Issue`. A machine profile the operator asked
+for (`--machine`, or their ~/.config file) that can't be used is always fatal.
+
 ## Where machine facts live
 
 - `docs/omniturn-post-rules.md`: the G4 dialect, with manual page references
@@ -115,7 +147,10 @@ These hold for every program the post writes. Each has a test.
    an `emit(p, op)` that writes the code with the `OmniTurnPost` helpers, and
    `SPEC = OpSpec(...)` with a unique `kind` and the next free `order`
    (higher than every existing one, so the new entry lands at the end of the
-   menu). Nothing else in `src/` needs editing: the package finds the file.
+   menu). Give it `validate` (and `validate_machine` if a rule needs the
+   machine profile) for its own rules, and `metric_defaults` for every inch
+   length or feed default. Nothing else in `src/` needs editing: the package
+   finds the file.
 2. Write the rule it relies on, with the manual page, in
    `docs/omniturn-post-rules.md`.
 3. Use it in a golden job (`tests/golden/jobs/`), regenerate the expected
@@ -126,7 +161,7 @@ These hold for every program the post writes. Each has a test.
    operators find menu entries by position.
 
 `tests/test_operations.py` fails if the new module is incomplete: a field with
-no operator label or help, no menu text, no tool kinds, no docstring, a menu
+no operator label or help, an inch length/feed default with no metric one, no menu text, no tool kinds, no docstring, a menu
 position (`order`) shared with another operation, or a menu that doesn't match
 `MENU_ORDER`. If another PR added an operation first, your rebase conflicts on
 `MENU_ORDER` and your `order` may clash: take the next free number again and

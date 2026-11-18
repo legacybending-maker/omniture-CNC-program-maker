@@ -15,8 +15,44 @@ from pathlib import Path
 
 from .job import load_job
 from .lint import lint
-from .post import PostError, post
+from .post import MachineConfig, PostError, post
 from .tools import ToolLibrary
+
+DEFAULT_MACHINE = Path.home() / ".config" / "omniturn-cam" / "machine.toml"
+
+
+def machine_for(explicit: str | None, units: str, default: Path = DEFAULT_MACHINE) -> tuple[MachineConfig, str]:
+    """The machine profile for a post run, and where it came from (for the
+    operator).
+
+    | --machine given? | file exists? | result                                  |
+    |------------------|--------------|-----------------------------------------|
+    | no               | no           | built-in Hardinge HLV-H profile         |
+    | no               | yes          | that file; any problem in it is fatal   |
+    | yes              | yes          | that file; any problem in it is fatal   |
+    | yes              | no           | fatal                                   |
+
+    An operator who names a machine must never get code for a different one,
+    so the built-in profile is used only when nothing was asked for and no
+    personal profile exists. Raises MachineConfigError (a ValueError).
+
+    ``default`` is a parameter so tests can point it at a temporary folder
+    instead of the real home directory (dependency injection: hand a
+    function what it depends on rather than have it reach out for it).
+    """
+    from .post.omniturn import MachineConfigError
+    from .validation import Issue
+
+    if explicit:
+        path = Path(explicit)
+        if not path.is_file():
+            raise MachineConfigError(
+                [Issue(str(path), "doesn't exist (given with --machine)", "Check the path; nothing was written")]
+            )
+        return MachineConfig.load(path, units), str(path)
+    if default.exists():
+        return MachineConfig.load(default, units), str(default)
+    return MachineConfig.for_units(units), "built-in default (Hardinge HLV-H OmniTurn G4)"
 
 
 def main(argv=None) -> int:
@@ -33,7 +69,8 @@ def main(argv=None) -> int:
     p.add_argument(
         "--machine",
         help="machine profile TOML (default: ~/.config/omniturn-cam/machine.toml "
-        "if present, else Hardinge HLV-H OmniTurn G4)",
+        "if present, else Hardinge HLV-H OmniTurn G4). A file given here that is "
+        "missing or wrong stops the post",
     )
     p.add_argument("--stdout", action="store_true", help="print the program instead of writing it")
 
@@ -66,12 +103,22 @@ def main(argv=None) -> int:
         return gui_main(["omniturn-cam"] + ([a.job] if a.job else []))
 
     if a.cmd == "post":
-        lib = ToolLibrary.load(a.tools)
-        job = load_job(a.job, lib)
-        from .post import MachineConfig
-
-        mpath = Path(a.machine) if a.machine else Path.home() / ".config" / "omniturn-cam" / "machine.toml"
-        machine = MachineConfig.load(mpath, job.units) if mpath.exists() else None
+        # Everything that reads a file the operator gave is inside one try, so
+        # any problem ends with "error: ..." and exit code 2 instead of a
+        # Python traceback. KeyError's message has quotes around it (that's
+        # how str() of a KeyError looks), hence the strip.
+        try:
+            lib = ToolLibrary.load(a.tools)
+            job = load_job(a.job, lib)
+            machine, source = machine_for(a.machine, job.units)
+        except OSError as e:
+            print(f"error: can't read {e.filename}: {e.strerror}", file=sys.stderr)
+            return 2
+        except (KeyError, ValueError) as e:
+            msg = str(e).strip('"')
+            print(f"error: {msg}", file=sys.stderr)
+            return 2
+        print(f"machine profile: {source}", file=sys.stderr)
         warns: list[str] = []
         try:
             code = post(job, machine, warnings=warns)
