@@ -136,7 +136,7 @@ def main(argv=None) -> int:
         if a.plot:
             from .backplot import plot
 
-            plot(code, a.plot, job.stock.diameter, f"{job.name}  {job.description}")
+            plot(code, a.plot, job.stock.diameter, f"{job.name}  {job.description}", machine.arc_codes)
             print(f"wrote {a.plot}")
         return 0
 
@@ -149,9 +149,21 @@ def main(argv=None) -> int:
         return 1 if errors else 0
 
     if a.cmd == "plot":
-        from .backplot import plot
+        from .backplot import ProgramError, plot
 
-        plot(Path(a.program).read_text(), a.png)
+        # A hand-written file can be anything. Refuse what can't be read with
+        # one "error:" line and exit code 2, like `post`, instead of a Python
+        # traceback (issue #36). errors="replace" turns bytes that aren't
+        # text into a marker character, which the interpreter then refuses
+        # with the line number, rather than failing to open the file at all.
+        try:
+            plot(Path(a.program).read_text(errors="replace"), a.png)
+        except OSError as e:
+            print(f"error: can't read {e.filename}: {e.strerror}", file=sys.stderr)
+            return 2
+        except ProgramError as e:
+            print(f"error: {a.program}: {e}", file=sys.stderr)
+            return 2
         return 0
     return 1
 
