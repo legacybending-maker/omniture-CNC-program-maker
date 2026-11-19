@@ -107,6 +107,35 @@ def thread_plan(op: Thread) -> dict:
     }
 
 
+def thread_clear_x(op: Thread, start_x: float, stock_x: float) -> float:
+    """The X the tool waits at between starts and leaves the thread from.
+
+    OD: outside the bar (``stock_x``, the bar plus clearance). ID: two first
+    passes (2 x I on diameter) inside the smaller of the start X and the
+    minor diameter, so it's clear of the thread's crests while it moves in Z.
+
+    For an ID that arithmetic can come out below zero in a small bore with a
+    deep first pass, which put the tool past the centreline. In a round hole
+    the clearance from the wall is greatest at the centre (half the minor
+    diameter) and shrinks again past it, so crossing is never better: the
+    clearance stops at X0. Only an automatic crossing from the cutting side
+    (start X above 0) is stopped; a negative X the operator gave as the start
+    is left as given.
+    """
+    if op.side == "od":
+        return stock_x
+    if clear_x_stops_at_centre(op, start_x):
+        return 0.0
+    return min(start_x, op.minor) - 2 * op.first_depth
+
+
+def clear_x_stops_at_centre(op: Thread, start_x: float) -> bool:
+    """True when ``thread_clear_x`` stopped an ID clearance at X0 (it would
+    otherwise have crossed the centreline). One function for the rule, so
+    ``thread_clear_x`` and the warning in ``emit`` can't disagree."""
+    return op.side == "id" and start_x > 0 and min(start_x, op.minor) - 2 * op.first_depth < 0
+
+
 def validate(op: Thread, ctx: CheckContext) -> Iterator[Issue]:
     """Layer 2: a thread that can be cut at all, whatever the machine.
 
@@ -158,6 +187,24 @@ def validate(op: Thread, ctx: CheckContext) -> Iterator[Issue]:
             "start_x",
             "is needed for a tapered thread (the manual corrects the start for the taper over the run-up, p2.29)",
         )
+    if op.side == "id" and op.major > op.minor and op.first_depth > 0:
+        plan = thread_plan(op)
+        # p2.24: between passes the cycle "will back away from the starting
+        # position plus two times the amount of I". For an OD that is away
+        # from the centre. For an ID the manual doesn't show which way; if it
+        # is toward the centre, as it must be to leave the wall, a deep first
+        # pass in a small bore takes the tool past the centreline, toward
+        # the far wall. That's the control's own move, so the post can't
+        # change it; it can only say so. VERIFY on the machine (F4 Verify
+        # and single block) before trusting it.
+        retract = plan["start_x"] - 2 * op.first_depth
+        if plan["start_x"] > 0 and retract < 0:
+            yield ctx.warning(
+                "first_depth",
+                f"the G33 cycle retracts 2 x I from its start between passes (p2.24), to about X{retract:.4g}, "
+                "past the centreline for this ID thread (VERIFY: the manual doesn't show the ID direction)",
+                "Use a smaller first pass (I), or check the retract on F4 Verify and in single block",
+            )
     if op.major > op.minor and op.first_depth > 0:
         plan = thread_plan(op)
         # OD threads cut down toward the minor, ID threads out toward the major:
@@ -197,7 +244,14 @@ def emit(p: OmniTurnPost, op: Thread) -> None:
     k = plan["k"]
 
     sx = plan["start_x"]
-    clear_x = p.stock_x if op.side == "od" else min(sx, op.minor) - 2 * op.first_depth
+    clear_x = thread_clear_x(op, sx, p.stock_x)
+    if clear_x_stops_at_centre(op, sx):
+        # thread_clear_x stopped at the centreline (see its docstring). The
+        # operator should know the clearance is smaller than usual.
+        p.warn(
+            f"{p.here}: the clearance position stops at the centreline (X0), {op.minor / 2:.4g} off the "
+            f"thread's minor diameter, instead of crossing it; check it in single block"
+        )
     z0 = op.z_start + op.runup
     p.call_tool(op, clear_x, p.job.stock.diameter)
     p.comment(f"THREAD ABOUT {max(1, round(plan['passes']))} PASSES")
