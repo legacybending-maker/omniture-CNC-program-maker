@@ -287,15 +287,31 @@ class OmniTurnPost:
     def check_travel(self, code: str) -> None:
         """Warn when the program's moves span more than the slide can travel. This only
         catches gross problems: where the travel sits relative to the part depends on
-        the tool offsets, which the post doesn't know."""
-        from ..backplot import interpret
+        the tool offsets, which the post doesn't know.
 
-        pts = [
-            q
-            for path in interpret(code, self.m.arc_codes)
-            for q in path.points()
-            if q[0] is not None and q[1] is not None
-        ]
+        Runs the backplot interpreter on ``code``, which ``post()`` has already
+        linted. What happens when the interpreter can't follow the program:
+
+        * UnsupportedProgram (legal code it doesn't draw, e.g. a G91 block in
+          raw lines): the travel isn't checked, and a warning says so and why.
+          The check is advisory (it only ever warns), so it mustn't stop a
+          legal program, but the operator is told it didn't run.
+        * Any other ProgramError (an arc that can't exist, a contour with no
+          start): PostError. The program says something impossible, and lint,
+          which checks format, not geometry, can't see it.
+
+        Raises PostError as above.
+        """
+        from ..backplot import ProgramError, UnsupportedProgram, interpret
+
+        try:
+            paths = interpret(code, self.m.arc_codes, self.m.decimals)
+        except UnsupportedProgram as e:
+            self.warn(f"travel not checked: the backplot can't follow {e}")
+            return
+        except ProgramError as e:
+            raise PostError(f"the generated program can't be read back: {e}") from None
+        pts = [q for path in paths for q in path.points()]
         if not pts:
             return
         zs = [q[0] for q in pts]
@@ -798,13 +814,20 @@ def post(job: Job, machine: MachineConfig | None = None, check: bool = True, war
         raise PostError(str(e).strip('"')) from None
     p = OmniTurnPost(job, machine)
     code = p.run()
-    p.check_travel(code)
-    if warnings is not None:
-        warnings.extend(p.warnings)
+    # Lint first, then the travel check (issue #36). Lint is the check that a
+    # program is well-formed; the travel check *reads* the program with the
+    # backplot interpreter, so it should only ever be handed one that passed.
+    # The other way round, a malformed line (a duplicate subroutine, a stray
+    # character) reached the interpreter first and surfaced as a crash or a
+    # confusing message instead of lint's clear one. `check=False` skips lint
+    # for callers that lint themselves; the interpreter still defends itself.
     if check:
         from ..lint import lint
 
-        problems = [p for p in lint(code) if p.severity == "error"]
+        problems = [pr for pr in lint(code) if pr.severity == "error"]
         if problems:
-            raise PostError("generated code failed the OmniTurn rules check:\n" + "\n".join(str(p) for p in problems))
+            raise PostError("generated code failed the OmniTurn rules check:\n" + "\n".join(str(pr) for pr in problems))
+    p.check_travel(code)
+    if warnings is not None:
+        warnings.extend(p.warnings)
     return code

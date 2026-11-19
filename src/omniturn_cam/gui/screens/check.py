@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...backplot import draw
+from ...backplot import ProgramError, draw
 from ...lint import lint
 from ..widgets import PlotCanvas
 from .base import Screen
@@ -64,7 +64,14 @@ class CheckScreen(Screen):
         n = code.count("\n")
         self._msg(f"{n} lines, {len(self.job.operations)} processes, {len(self.job.setup.stations)} tools", "#334")
         ax = self.canvas.clear()
-        draw(ax, code, self.job.stock.diameter)
+        try:
+            draw(ax, code, self.job.stock.diameter, arc_codes=self.win.last_machine.arc_codes)
+        except ProgramError as e:
+            # post() reads the program back for the travel check, so this
+            # shouldn't happen; if it does, say so instead of a blank plot
+            # or an exception dialog (issue #36).
+            self.canvas.message(f"The backplot can't draw this program: {e}")
+            return
         self.canvas.draw_idle()
 
 

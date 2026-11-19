@@ -89,7 +89,39 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions:
 - numpy (needed for STL/3MF import) is now a declared dependency.
 - Version numbers agree everywhere (0.2.0); `package.xml` already said 0.2.0.
 
+- **Machines set to `arc_format = "ik"` can post again** (#36). Every
+  program with an arc stopped with `KeyError: 'r'` because the travel check
+  could only read R arcs. I/K arcs are now read back around the centre they
+  give (I radial, p2.19), in the main program and in contour subroutines.
+- **STEP/STL/3MF import no longer refuses valid arcs** (#36). End points and
+  radii were rounded separately (6 decimals inch, 4 mm), which could make a
+  half-round groove's chord longer than its diameter. Imports now keep
+  10 decimals, just enough to clear float noise, and the comment in
+  `stepimport.py` shows why that can't break an arc.
+- **Subroutines in the include file are found whatever their header looks
+  like** (#36). `}1 (LOADER)` was missed, so a contour could be given the same
+  number. `}01` and `}1` are now the same subroutine everywhere, a duplicate
+  in the include file is refused naming the file, and lint warns about
+  leading zeros.
+- **The backplot refuses what it can't read instead of crashing** (#36): a
+  contour subroutine starting with `m10`, a contour with no X/Z start, an arc
+  without R or I/K, a stray character, a number like `x1.2.3`. Each is an
+  error with the line number. `omniturn-cam plot` prints it and exits 2; F5
+  shows it on the plot. Legal raw code the backplot can't follow (a move in
+  G91 or G73) gets a "travel not checked" warning instead of stopping the post.
+- Lint now refuses non-ASCII, characters that aren't part of a word,
+  unreadable numbers, a word missing its number, negative F or S, and a
+  subroutine that never ends or starts inside another (#36). It runs before
+  the travel check, so it reports these first.
+- The F5 backplot draws arcs with the machine's own G02/G03 mapping.
+- A C/R corner between lines that double back is an error with line numbers
+  instead of a division by zero when a hand-written program is plotted (#36).
+
 ### G-code output
+- Reading programs back (#36): no change to any program omniturn-cam writes
+  (golden output unchanged). Programs that used to crash the post (any arc
+  with `arc_format = "ik"`) now post. Raw code with characters or numbers the
+  control can't read, or with an arc that can't exist, is now refused.
 - Input validation (#32): no change to any valid program. Jobs that used to
   post with the values listed under Added now refuse instead.
 - Programs with raw lines or a subroutine call: modes the code could have

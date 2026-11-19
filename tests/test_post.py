@@ -1,5 +1,6 @@
 """Tests anchored to the worked examples in the OmniTurn operator manual."""
 
+import math
 from pathlib import Path
 
 import pytest
@@ -685,3 +686,218 @@ def test_external_reader_follows_m98_and_stops_on_recursion():
     assert subs == {1: ["m10", "m98p2"], 2: ["g04f1"], 3: ["m98p3"]}
     assert analyse(["m98p1"], subs).forget == {"feed"}
     assert analyse(["m98p3"], subs).forget == EVERYTHING
+
+
+# --------------------------------------------------------------------- issue #36: reading programs back
+# The post reads every program it writes back through the backplot
+# interpreter (check_travel), so a reader that crashes or misreads stops or
+# corrupts real output. These pin the post-level half of issue #36; the
+# interpreter on its own is tested in tests/test_backplot.py.
+from omniturn_cam.backplot import CenteredArc  # noqa: E402
+from omniturn_cam.geometry import corner_blend  # noqa: E402
+
+
+def _ik(units="inch"):
+    return MachineConfig.for_units(units, {"arc_format": "ik"})
+
+
+def _arc_lines(code):
+    """(main-program arc lines, subroutine arc lines)."""
+    main, _, subs = code.partition("\nm30\n")
+    pick = lambda part: [ln for ln in part.splitlines() if ln.startswith(("g02", "g03"))]  # noqa: E731
+    return pick(main), pick(subs)
+
+
+def test_ik_machine_posts_arcs_in_main_program_and_contour(lib):
+    """Defect A: with arc_format = "ik" every post with an arc died with
+    KeyError 'r' in the travel check. The manual's G75 job has arcs in both the
+    finish pass (main program) and the contour subroutine."""
+    job = load_job(EX / "manual_g75.toml", lib)
+    code = post(job, _ik())
+    main_arcs, sub_arcs = _arc_lines(code)
+    assert main_arcs and sub_arcs
+    assert all("i" in a and "k" in a and "r" not in a for a in main_arcs + sub_arcs)
+    assert not [p for p in lint(code) if p.severity == "error"]
+
+
+def test_ik_and_r_programs_read_back_to_the_same_path(lib):
+    """The interpreter's I/K reading (centre = start + I/K, I radial, p2.19)
+    must agree with the post's I/K writing: same points as the R program, to
+    within one output step."""
+    job = load_job(EX / "manual_g75.toml", lib)
+    r_m, ik_m = MachineConfig.for_units("inch"), _ik()
+    r_pts = [q for p in interpret(post(job, r_m), r_m.arc_codes, r_m.decimals) for q in p.points()]
+    ik_pts = [q for p in interpret(post(job, ik_m), ik_m.arc_codes, ik_m.decimals) for q in p.points()]
+    assert len(r_pts) == len(ik_pts)
+    assert all(abs(a[0] - b[0]) <= 2e-4 and abs(a[1] - b[1]) <= 2e-4 for a, b in zip(r_pts, ik_pts, strict=True))
+
+
+def test_ik_machine_posts_metric_arcs(lib):
+    """The metric job with arcs posts under I/K too (3 decimals, mm)."""
+    job = load_job(Path(__file__).parent / "golden" / "jobs" / "metric.toml", lib)
+    code = post(job, _ik("metric"))
+    assert any("i" in a and "k" in a for a in sum(_arc_lines(code), []))
+
+
+def test_lint_runs_before_the_travel_check(lib, monkeypatch):
+    """Defect E: lint (is the program well formed?) must refuse before the
+    travel check reads the program. Before #36 the interpreter ran first, so a
+    malformed program crashed it instead of getting lint's message."""
+    import omniturn_cam.lint as lint_module
+
+    calls = []
+    monkeypatch.setattr(
+        lint_module, "lint", lambda code, *a: calls.append("lint") or [lint_module.Problem(1, "error", "made up")]
+    )
+    monkeypatch.setattr(OmniTurnPost, "check_travel", lambda self, code: calls.append("travel"))
+    with pytest.raises(PostError, match="made up"):
+        post(load_job(EX / "manual_g75.toml", lib))
+    assert calls == ["lint"]
+
+
+def test_travel_check_still_runs_after_lint_passes(lib, monkeypatch):
+    calls = []
+    real = OmniTurnPost.check_travel
+    monkeypatch.setattr(OmniTurnPost, "check_travel", lambda self, code: calls.append("travel") or real(self, code))
+    post(load_job(EX / "manual_g75.toml", lib))
+    assert calls == ["travel"]
+
+
+def test_raw_code_the_backplot_cannot_follow_warns_travel_not_checked(lib):
+    """Legal raw code that moves in G91 can't be drawn. The travel check is
+    advisory, so the program is still made, and the operator is told the
+    check didn't run instead of it silently passing."""
+    raw = RawCode(code="g91\nz-.01\ng90", ends_at="tool_change_z")
+    warns = []
+    code = post(_hjob(lib, _drill(-0.1), raw, _drill(-0.2)), warnings=warns)
+    assert "g91" in code
+    assert any("travel not checked" in w and "G91" in w for w in warns), warns
+
+
+def test_raw_code_with_an_impossible_arc_is_refused(lib):
+    """An arc that can't exist isn't "can't follow", it's wrong: refused."""
+    raw = RawCode(code="g01x.5z-.1\ng02x.9z-.5r.05", ends_at="tool_change_z")
+    with pytest.raises(PostError, match="can't be read back.*can't reach"):
+        post(_hjob(lib, _drill(-0.1), raw, _drill(-0.2)))
+
+
+# ---- subroutine declarations (defect C)
+@pytest.mark.parametrize("header", ["}1 (LOADER)", "}01", "/}1"])
+def test_include_file_subroutine_header_forms_are_seen(lib, tmp_path, header):
+    """`}1 (LOADER)` used to be missed by job.external_subs(), so the post
+    could number its own contour 1 and the program defined subroutine 1
+    twice. Every reader now uses gcode.subroutine_start."""
+    job = load_job(EX / "manual_g75.toml", lib)
+    job.include_subs = _subs(tmp_path, f"{header}\nm10\nm99\n")
+    assert job.external_subs()[1] == [1]
+    code = post(job)
+    assert "g75i.02u.005f.003p2" in code and "\n}2\n" in code  # numbered past 1
+    assert not [p for p in lint(code) if p.severity == "error"]
+
+
+def test_duplicate_subroutine_in_the_include_file_is_refused_naming_the_file(lib, tmp_path):
+    job = load_job(EX / "manual_g75.toml", lib)
+    job.include_subs = _subs(tmp_path, "}1\nm10\nm99\n}01 (AGAIN)\nm11\nm99\n")
+    with pytest.raises(PostError, match=r"subroutine 1 is defined twice in .*subs\.txt"):
+        post(job)
+
+
+def test_shared_reader_normalises_numbers():
+    from omniturn_cam.gcode import code_part, subroutine_numbers, subroutine_start
+
+    assert [subroutine_start(code_part(s)) for s in ("}1", "}01 (X)", " } 7 ", "/}3", "}1a", "}", "m99")] == [
+        1,
+        1,
+        7,
+        3,
+        None,
+        None,
+        None,
+    ]
+    assert list(subroutine_numbers("}2\nm99\n(}9 in a comment)\n}02\nm99\n")) == [2, 2]
+
+
+# ---- lint (defects C and section 8 of #36)
+def _lint_msgs(program):
+    return [(p.severity, p.message) for p in lint(program)]
+
+
+def test_lint_matches_leading_zero_subroutines_to_their_calls_and_warns():
+    msgs = _lint_msgs("m98p1\nm30\n}01\nm10\nm99\n")
+    assert not [m for s, m in msgs if s == "error"], msgs
+    assert any(s == "warning" and "leading zero" in m for s, m in msgs)
+    msgs = _lint_msgs("m98p01\nm30\n}1\nm10\nm99\n")
+    assert not [m for s, m in msgs if s == "error"] and any("p1, not p01" in m for s, m in msgs)
+
+
+def test_lint_reports_duplicate_written_two_ways():
+    msgs = _lint_msgs("m30\n}1 (LOADER)\nm10\nm99\n}01\nm11\nm99\n")
+    assert ("error", "subroutine 1 is defined twice - check pasted / included subroutine files") in msgs
+
+
+@pytest.mark.parametrize(
+    "program, severity, words",
+    [
+        ("m30\n}1\nm10\n", "error", "never ends"),
+        ("m30\n}1\nm10\n}2\nm11\nm99\n", "error", "starts before the subroutine on line 2 ends"),
+        ("g00x1z0\nm99\nm30\n", "warning", "no subroutine open"),
+        ("g01x1z0°\n", "error", "isn't ASCII"),
+        ("g01x1;z0\n", "error", "isn't part of any OmniTurn word"),
+        ("g01x1.2.3z0\n", "error", "can't read '1.2.3'"),
+        ("g01x-z0\n", "error", "can't read '-'"),
+        ("g01xz0\n", "error", "X has no number"),
+        ("g95f-.003\n", "error", "can't be negative"),
+        ("m03s-1000\n", "error", "can't be negative"),
+    ],
+)
+def test_lint_refuses_what_the_readers_would_skip(program, severity, words):
+    """The interpreter and the handoff reader skip anything that isn't a
+    letter-number word; lint must refuse it so it never reaches the machine."""
+    msgs = _lint_msgs(program)
+    assert any(s == severity and words in m for s, m in msgs), msgs
+
+
+@pytest.mark.parametrize("line", ["g95f.05z-.5p", "g33x.408z-.5i.02k.077pc29o", "rf", "lf", "ls3", "ls", "}1 (LOADER)"])
+def test_lint_accepts_bare_words_the_manual_uses(line):
+    """P (spindle sync, p2.30), O and C in a G33 (p2.23-2.29), RF, LF and LS
+    carry no number in the manual's own examples."""
+    program = f"{line}\nm99\n" if line.startswith("}") else f"{line}\n"
+    assert not [m for s, m in _lint_msgs(program) if s == "error" and "number" in m]
+
+
+# ---- corners (defect F): corner_blend itself, for programs that never were a Profile
+def test_corner_blend_refuses_degenerate_corners_with_value_error():
+    """corner_blend divided by tan(0) for a line doubling back and by a zero
+    length for a zero-length line. Now a ValueError the interpreter turns
+    into a ProgramError with line numbers."""
+    with pytest.raises(ValueError, match="doubles back"):
+        corner_blend((0, 0.5), (-0.5, 0.5), (0, 0.5), radius=0.05)
+    with pytest.raises(ValueError, match="no length"):
+        corner_blend((-0.5, 0.5), (-0.5, 0.5), (-0.5, 0.7), chamfer=0.05)
+
+
+def test_near_tangent_corner_is_legitimate():
+    """A shallow corner (a 0.1 degree taper change) is real geometry: the
+    shape is accepted and the corner blends without blowing up."""
+    angle = math.radians(0.1)
+    end = Point(2 * (0.5 + 0.5 * math.tan(angle)), -1.0)
+    p = Profile(Point(1.0, 0), name="od").line(z=-0.5, r=0.02).line(x=end.x, z=end.z)
+    assert p.issues() == []
+    assert len(p.polyline()) > 3
+
+
+@pytest.mark.parametrize("excess, ok", [(0.0, True), (5e-10, True), (1e-6, False)])
+def test_half_circle_exactly_at_the_validity_boundary(excess, ok):
+    """chord = 2R is a half circle and valid; a chord longer than 2R by more
+    than floating-point noise (geometry.LENGTH_TOL) is not."""
+    r = 0.25
+    p = Profile(Point(1.0, 0.0), name="od").line(z=-0.1).arc(1.0, -0.1 - 2 * r - excess, r, "cw")
+    assert (p.issues() == []) is ok
+
+
+def test_backplot_contour_arcs_are_drawn_around_the_written_centre(lib):
+    """The interpreter keeps the centre it computed from the written words
+    (CenteredArc) rather than recomputing it later."""
+    code = post(load_job(EX / "manual_g75.toml", lib), _ik())
+    contour = next(p for p in interpret(code, decimals=4) if p.kind == "contour")
+    assert any(isinstance(s, CenteredArc) for s in contour.segments)

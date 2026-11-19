@@ -25,6 +25,13 @@ from .validation import Issue, is_finite, raise_errors, show
 
 ArcDir = Literal["cw", "ccw"]
 
+# How close two lengths must be to count as equal in a shape, in the job's
+# own units (inch or mm). It only absorbs floating-point noise: shapes are
+# kept at full precision (rounding happens when the program is written), so
+# a shape that's really invalid by more than this is refused. One name for it
+# so stepimport.py can show its own rounding stays inside it (IMPORT_DECIMALS).
+LENGTH_TOL = 1e-9
+
 
 @dataclass(frozen=True)
 class Point:
@@ -53,15 +60,27 @@ class Arc:
     radius: float
     direction: ArcDir  # as seen on the print (Z+ right, X+ up)
 
-    def center(self, start: Point) -> tuple[float, float]:
-        """Arc centre as (z, r) in radius units, choosing the minor (<=180 deg) arc."""
+    def center(self, start: Point, tol: float = LENGTH_TOL) -> tuple[float, float]:
+        """Arc centre as (z, r) in radius units, choosing the minor (<=180 deg) arc.
+
+        ``tol`` is how far the chord may exceed the diameter 2R and still be
+        read as a half circle. The default, LENGTH_TOL, only absorbs floating-point
+        noise: a shape typed in or imported at full precision must really fit.
+        The backplot passes a larger one for numbers that were *rounded* when
+        the program was written (an arc that fits exactly can come out a
+        ten-thousandth too long once its end points are rounded, issue #36);
+        it works that tolerance out from the decimals actually written.
+
+        Raises ValueError when start and end are the same point or the radius
+        can't reach.
+        """
         z1, r1 = start.z, start.r
         z2, r2 = self.end.z, self.end.r
         dz, dr = z2 - z1, r2 - r1
         chord = math.hypot(dz, dr)
         if chord == 0:
             raise ValueError("arc start and end are the same point")
-        if chord > 2 * self.radius + 1e-9:
+        if chord > 2 * self.radius + tol:
             raise ValueError(
                 f"arc radius {self.radius} too small for chord {chord:.5f} "
                 f"(from x{start.x} z{start.z} to x{self.end.x} z{self.end.z})"
@@ -162,7 +181,7 @@ class Profile:
         # slice [: len(segs)] drops the last end, which begins nothing.
         starts = ([self.start] + [seg.end for seg in segs])[: len(segs)]
         for i, (p0, seg) in enumerate(zip(starts, segs, strict=True), 1):
-            if abs(seg.end.x - p0.x) < 1e-9 and abs(seg.end.z - p0.z) < 1e-9:
+            if abs(seg.end.x - p0.x) < LENGTH_TOL and abs(seg.end.z - p0.z) < LENGTH_TOL:
                 bad(
                     f"segment {i}",
                     f"x{seg.end.x:g} z{seg.end.z:g}",
@@ -225,7 +244,7 @@ class Profile:
             at_start = setback_end[i - 1] if i > 0 and isinstance(segs[i - 1], Line) else 0.0
             used = at_start + setback_end[i]
             length = math.hypot(seg.end.z - starts[i].z, seg.end.r - starts[i].r)
-            if used > length + 1e-9:
+            if used > length + LENGTH_TOL:
                 bad(
                     f"segment {i + 1}",
                     f"{length:.4g} long",
@@ -280,17 +299,51 @@ def _arc_points(z0, r0, z1, r1, cz, cr, direction: ArcDir, step_deg: float):
 
 
 def corner_blend(p0, p1, p2, chamfer=None, radius=None, step_deg=5.0):
-    """Points (z, r) replacing the sharp corner p1 between lines p0-p1 and p1-p2."""
+    """Points (z, r) replacing the sharp corner p1 between lines p0-p1 and p1-p2.
+
+    p0 is where the straight part of the first line begins (the previous
+    corner's blend end, if it had one), so the lengths checked here are what
+    is actually left for this corner.
+
+    Raises ValueError, never ZeroDivisionError, for a corner the arithmetic
+    below can't handle: a line of zero length, or a second line doubling back
+    along the first. Profile.issues() refuses these for a shape before it
+    gets here; this guard is for programs the backplot reads (hand-written,
+    raw code), which never went through Profile (issue #36). The tolerances
+    are the ones Profile.issues() uses.
+
+    Lines that run on in a straight line have no corner to blend, so the
+    sharp point is returned as it is. That case isn't an error here: a very
+    shallow corner in a shape (which Profile accepts) can read back as exactly
+    straight once the program's numbers are rounded, and the radius maths
+    would then divide by zero (the bisector of two opposite directions has no
+    length).
+
+    Whether a C/R *fits* its lines is deliberately not checked here.
+    Profile.issues() checks it at full precision before any code is written.
+    Here the points come from a written program, rounded to the machine's
+    decimals, and a corner that fits exactly can read back a ten-thousandth
+    too big: refusing it would refuse a correct program. An oversized corner
+    in a hand-written program is drawn as written.
+    """
     (z0, r0), (z1, r1), (z2, r2) = p0, p1, p2
     a = (z0 - z1, r0 - r1)
     b = (z2 - z1, r2 - r1)
     la, lb = math.hypot(*a), math.hypot(*b)
+    word = "C" if chamfer else "R"
+    if la < LENGTH_TOL or lb < LENGTH_TOL:
+        raise ValueError(f"corner {word}: a line next to it has no length")
     ua = (a[0] / la, a[1] / la)
     ub = (b[0] / lb, b[1] / lb)
+    cos = ua[0] * ub[0] + ua[1] * ub[1]
+    if cos < -1 + 1e-9:
+        return [p1]
+    if cos > 1 - 1e-9:
+        raise ValueError(f"corner {word}: the second line doubles back along the first")
     if chamfer:
         # OmniTurn C value: distance back from the corner along each line
         return [(z1 + ua[0] * chamfer, r1 + ua[1] * chamfer), (z1 + ub[0] * chamfer, r1 + ub[1] * chamfer)]
-    theta = math.acos(max(-1.0, min(1.0, ua[0] * ub[0] + ua[1] * ub[1])))
+    theta = math.acos(max(-1.0, min(1.0, cos)))
     t = radius / math.tan(theta / 2)
     s = (z1 + ua[0] * t, r1 + ua[1] * t)
     e = (z1 + ub[0] * t, r1 + ub[1] * t)

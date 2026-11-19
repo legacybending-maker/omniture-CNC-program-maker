@@ -83,6 +83,7 @@ class MainWindow(QMainWindow):
         self.job_path: Path | None = None
         self.dirty = False
         self.last_error = ""
+        self.last_machine: MachineConfig | None = None  # set by generate()
         self.warnings: list[str] = []
         self.machine_path = default_machine_path()
 
@@ -249,6 +250,9 @@ class MainWindow(QMainWindow):
             self.last_error = str(e).strip('"')
             return None
         self.last_error = ""
+        # Kept so the backplot (F5) reads arcs with this machine's G02/G03
+        # mapping, the same profile the program was just made for.
+        self.last_machine = machine
         return code
 
     # ------------------------------------------------------------------ files

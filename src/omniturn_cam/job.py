@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from .gcode import subroutine_numbers
 from .geometry import Arc, Line, Point, Profile
 from .opcheck import operation_issues
 from .operations import OPERATION_TYPES, Operation, kind_of
@@ -57,8 +58,11 @@ class Job:
         if not self.include_subs:
             return "", []
         text = Path(self.include_subs).read_text(errors="replace")
-        nums = [int(n) for n in re.findall(r"^\s*\}(\d+)\s*$", text, re.M)]
-        return text, nums
+        # The shared reader (gcode.py), the same one lint and the backplot
+        # use: `}1 (LOADER)` is subroutine 1 here too, and `}01` is 1, so the
+        # post never numbers its own contour subroutine onto one of these
+        # (issue #36). Duplicates are kept so issues() can report them.
+        return text, list(subroutine_numbers(text))
 
     def issues(self, machine: MachineConfig | None = None) -> list[Issue]:
         """Every problem with this job: errors and warnings, nothing raised.
@@ -88,6 +92,22 @@ class Job:
         out += self._stock_issues()
         if self.include_subs and not Path(self.include_subs).is_file():
             out.append(Issue("job", f"subroutine file {self.include_subs} not found", setting="Include file"))
+        elif self.include_subs:
+            # Each number may be defined only once (p2.55). Lint catches it in
+            # the finished program too, but saying so here names the file, and
+            # the operator hears it before anything is generated.
+            seen: set[int] = set()
+            for n in self.external_subs()[1]:
+                if n in seen:
+                    out.append(
+                        Issue(
+                            "job",
+                            f"subroutine {n} is defined twice in {self.include_subs} (manual p2.55)",
+                            "Renumber or delete one of them in the subroutine file",
+                            setting="Include file",
+                        )
+                    )
+                seen.add(n)
         out += self._station_issues()
         for prof in self.profiles.values():
             out += prof.issues()

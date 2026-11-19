@@ -397,7 +397,49 @@ class ImportResult:
         return tuple(self.axis.loc[i] + self.axis.dir[i] * zl + self.radial[i] * r for i in range(3))
 
 
-def _to_profile(chain: list[Seg], name: str, side: str, scale: float, decimals: int) -> Profile:
+# How many decimals imported numbers keep, in the job's units, inch or mm.
+#
+# Imports used to round to 6 decimals (inch) or 4 (mm), the end points and
+# each arc radius separately. That can turn a valid arc into an impossible
+# one: r .0050004 across a chord of .0100008 (a half circle) became r .005
+# across .010001, longer than the diameter, and the shape was refused
+# (issue #36). The geometry check allows LENGTH_TOL (1e-9), and the old
+# rounding errors were far bigger than that.
+#
+# Rounding is still worth doing, but only to clear floating-point noise, so
+# 19.05 mm / 25.4 is stored as 0.75 and not 0.7500000000000001. The rule is
+# that rounding must never move a shape across the line the check draws:
+#
+#   A point is stored as (X = diameter, Z), each rounded by at most
+#   e = 0.5 * 10**-IMPORT_DECIMALS. In radius terms (X/2) a point moves at
+#   most hypot(e/2, e) = 1.118e, so a chord changes by at most 2 * 1.118e,
+#   and 2R by at most 2e. Worst case, (chord - 2R) moves by 4.24e.
+#
+# With 10 decimals that's 4.24 * 5e-11 = 2.1e-10, under LENGTH_TOL. So an arc
+# that fitted before rounding still fits after it, and one refused after it
+# was already wrong by more than LENGTH_TOL - 2.1e-10 at full precision.
+# tests/test_stepimport.py checks this inequality.
+#
+# The same number of decimals is right for inch and metric because both
+# sides of the comparison are in the job's own units: the rounding happens
+# after scaling to inch or mm, and LENGTH_TOL is in those same units. A
+# separate "metric" value would have to be justified by a unit difference
+# that isn't there. The machine's own precision (4 decimals inch, 3 mm) is
+# applied only when the program is written (MachineConfig.decimals).
+IMPORT_DECIMALS = 10
+# The worst-case factor worked out above, so the test checks the same
+# arithmetic the comment shows: 2 * hypot(0.5, 1) + 2 = 4.236...
+ARC_ROUNDING_FACTOR = 2 * math.hypot(0.5, 1.0) + 2
+
+
+def _to_profile(chain: list[Seg], name: str, side: str, scale: float, decimals: int = IMPORT_DECIMALS) -> Profile:
+    """Turn a chain of model segments (mm, radius coordinates) into a Profile
+    in the job's units with X as a diameter, rounded to ``decimals`` (see
+    IMPORT_DECIMALS for why that many, and why it's safe for arcs).
+
+    ``+ 0.0`` turns a rounded -0.0 into 0.0, so a shape never shows "x-0".
+    """
+
     def P(p):
         return Point(float(round(2 * p[1] * scale, decimals)) + 0.0, float(round(p[0] * scale, decimals)) + 0.0)
 
@@ -517,7 +559,7 @@ def finish_loop(
             "short lines - check the shape on F2"
         )
     scale = 1 / MM_PER_INCH if units == "inch" else 1.0
-    dec = 6 if units == "inch" else 4
+    dec = IMPORT_DECIMALS
     od = _to_profile(_merge_collinear(od_chain), "od", "od", scale, dec)
     idp = _to_profile(_merge_collinear(id_chain), "id", "id", scale, dec) if id_chain else None
     for prof in (od, idp):
