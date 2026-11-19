@@ -96,10 +96,12 @@ g04f.2
 g00z.1
 z1
 m05
+m09
 m01
 t7(STRADDLE KNURL 80 TPI)
 x1.05z1
 m03s600
+m08
 (KNURL)
 z-.45
 g95f.002x.735

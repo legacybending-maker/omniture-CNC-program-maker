@@ -38,6 +38,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions:
 - New processes in a metric job start with millimetre values (feed .08,
   thread M10x1.5, cutoff to -.25...). Changing units still never converts
   numbers already entered.
+- **Machine safeguards (#40).** F1's *Length out of collet* is used: the post
+  warns when a tool's programmed Z reaches the collet face, and when a
+  grooving or cutoff blade's width might (warnings only; holders and offsets
+  aren't modelled, and each warning says what it assumed). Axial pass has
+  **Coolant off for the stop** (on by default): M09 before the M00/M01 die
+  head reset, because M00 leaves M functions on (p2.53).
+- `docs/machine-verification.md`: software vs physical verification, what to
+  record in `verified.toml`, and a 12-test operator checklist for the open
+  VERIFY items.
 
 ### Changed
 - Each operation type is one file in `operations/` (dataclass, labels, menu
@@ -57,6 +66,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions:
   as written. Docs only; no change to any program.
 
 ### Fixed
+- **Comp lead-in (#40).** A finish pass whose D-word move is shorter than the
+  nose radius is refused (p2.32: the tool must be off the part by at least
+  the nose radius when comp turns on). It used to accept, e.g., a .001
+  lead-in with a .0156 nose radius.
+- **ID clearances never cross the centreline (#40).** An ID finish lead-off
+  and an ID thread's clearance X stop at X0 in a small bore instead of going
+  past it (with a warning). With comp on, a bore too small to lead off twice
+  the nose radius is refused. An ID G33 whose own retract would pass X0 gets
+  a VERIFY warning.
 - **machine.toml is checked strictly.** A misspelt setting (`max_rmp`), a
   section other than `[inch]`/`[metric]`, a quoted number, NaN, or a zero or
   negative limit now stops with the file, section and setting, instead of
@@ -149,6 +167,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions:
   `~/.config/omniturn-cam/omniturn-cam.log` and reported as internal errors.
 
 ### G-code output
+- Machine safeguards (#40): `bushing.cnc` changes by two lines: `m09`
+  between the die head's `m05` and `m01`, and `m08` after the knurl's
+  `m03s600` (the post now knows coolant was turned off and turns it back on).
+  Any job with an Axial pass that stops (die heads) gets the same two lines.
+  Small-bore ID finishes and threads that used to go to a negative X now stop
+  at X0; no golden job has one. Header and CSS lines unchanged (investigated,
+  pinned by tests, VERIFY on the machine).
 - GUI integrity (#38): no change to any program. The GUI no longer makes a
   program from stale field values or from a shape that isn't the one on
   screen.

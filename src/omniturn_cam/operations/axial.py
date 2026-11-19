@@ -30,6 +30,11 @@ class AxialPass(Operation):
     reverse_spindle_out: bool = False  # e.g. non-opening dies/taps: m04 on the way out
     stop_after: Literal["none", "m01", "m00"] = "none"  # e.g. operator resets a die head
     stop_spindle_for_stop: bool = True  # m05 before the stop so hands aren't near a turning spindle
+    # m09 before the stop. M00 "does not cancel active M functions" (manual
+    # p2.53, Codes Honored list), so without it coolant keeps running while
+    # the operator reaches in to reset a die head. A new optional field with a
+    # safe default, so job files saved before Stage 5 still load and get it.
+    stop_coolant_for_stop: bool = True
     label = "axial"
 
 
@@ -48,6 +53,12 @@ FIELDS = {
         "Stop spindle for the stop",
         "bool",
         "m05 before the stop so the operator isn't reaching past a turning spindle; the next cut restarts it",
+    ),
+    "stop_coolant_for_stop": FieldInfo(
+        "Coolant off for the stop",
+        "bool",
+        "m09 before the stop: M00 and M01 don't cancel M functions (p2.53), so coolant would keep running. "
+        "The next process that uses coolant turns it back on with m08",
     ),
 }
 
@@ -78,6 +89,11 @@ def emit(p: OmniTurnPost, op: AxialPass) -> None:
         p.rapid(z=p.m.tool_call_z)
         if op.stop_spindle_for_stop:
             p.stop_spindle()  # recorded as M05, so the next cut restarts it
+        if op.stop_coolant_for_stop:
+            # Recorded as M09 (stop_coolant), so the next operation that wants
+            # coolant writes M08 again. One M code per line (p2.6), so it's
+            # its own line, after the M05 and before the stop.
+            p.stop_coolant()
         p.emit(op.stop_after)
 
 

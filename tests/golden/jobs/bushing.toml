@@ -13,6 +13,10 @@ include_subs = "loader_subs.txt"
 
 [stock]
 diameter = 1.0
+# Length out of collet (Stage 5 stock-length check). With the .03 face stock
+# the bar end is Z.03 and the collet face about Z-.97: every tool clears it,
+# so the check runs and stays quiet.
+length = 1.0
 bore = 0.25
 material = "660 bronze"
 
