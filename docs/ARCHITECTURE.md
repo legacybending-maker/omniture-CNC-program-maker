@@ -103,6 +103,29 @@ These hold for every program the post writes. Each has a test.
    operation re-establishes it, or the post refuses
    (`docs/omniturn-post-rules.md`, "Handing control to code the post didn't
    write"; `tests/test_post.py`).
+8. **Every operation ends where the next tool change is safe** (Stage 5,
+   issue #40). Tool changes retract in Z alone to the tool-change Z from
+   wherever the last operation left the slide (`OmniTurnPost.call_tool`), so
+   each operation must end where that straight Z retract is in free air,
+   with comp off (G40) and rpm mode (G97). This used to be true only because
+   each operation happened to be written that way; it is now a contract,
+   checked for every registered operation by `tests/test_machine_safety.py`
+   (a new operation fails there until it's added to the table):
+
+   | Operation | Ends at | Why a Z-alone retract is clear |
+   |---|---|---|
+   | face | its start X, z_clear in front of the last face pass | in front of the face just cut |
+   | rough (G75/G78), box rough (G74) | the cycle start point | the cycle returns there (2.39, 2.41); the start is outside the shape |
+   | finish | the lead-off X, at its approach Z | approach Z is in front of the shape |
+   | drill (G81/G83) | X0 at its start Z | the cycle returns there (2.48-2.50) |
+   | tap, axial | its X at its start Z (axial with a stop: tool-change Z) | back up the line it fed down |
+   | thread (G33) | its clearance X at its last start Z | the line it approached on; ID clearance never crosses X0 |
+   | radial, cutoff | its start X at its Z | back out along the line it fed in on |
+   | raw, call sub | unknown unless declared `tool_change_z` | parked at the tool-change Z before; never moved from an unknown position after (invariant 7) |
+
+   Known limit: radial and thread trust their start X. A Start diameter
+   typed *below* a larger shoulder nearer the face would make the Z retract
+   cross it; the post doesn't model the part's material, so it can't see that.
 
 ## Validation
 
@@ -202,6 +225,12 @@ never shown as a problem with the operator's file. Message boxes go through
 
 - `docs/omniturn-post-rules.md`: the G4 dialect, with manual page references
   and CONFIRMED / VERIFY marks. Any rule the post follows must be in here.
+- `docs/machine-verification.md`: software vs physical verification, what a
+  `verified.toml` entry records, and the operator checklist for the VERIFY
+  items.
+- The travel check (`OmniTurnPost.check_travel`) also compares each tool's
+  deepest programmed Z with the collet face worked out from F1's length out
+  of the collet (`check_stock_length`). Warnings only; not a collision model.
 - `src/omniturn_cam/data/default_machine.toml` and `MachineConfig`: limits of
   the reference machine (Hardinge HLV-H with OmniTurn G4, 4000 rpm VFD).
 - The OmniTurn manuals themselves aren't in the repo (copyright). Cite pages.

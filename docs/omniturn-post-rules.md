@@ -41,12 +41,20 @@ The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the 
 - G94 = IPM (F300 = rapid, also max feed). G95 = IPR (max feed limited to 300 IPM equivalent)
 - G00 switches to rapid; G01 returns to the last-programmed feed; `G95Fn` on a move also switches from rapid to feed
 - M03Sn / M04Sn spindle, M05 stop. G97 RPM (default), G96Sn CSS with G76Sn min / G77Sn max. Turn CSS on after positioning for the cut and back to G97 after (2.52)
+- **CSS line order.** The post writes `g96s..`, then `g76s..` (if a minimum is set), then `g77s..`: the order of the manual's own example on p2.52 (`G96S250`, `G76S500`, `G77S2500`). The manual doesn't say whether the order matters or whether G76/G77 may come before G96. Whether the control briefly runs unclamped between the G96 and G77 lines is **VERIFY**; the post keeps the manual's order until that's checked (docs/machine-verification.md, test 3), and `tests/test_machine_safety.py` pins it.
 - Adding P to the end of a move starts it in sync with the spindle (2.11, 2.30), e.g. `g95f.05z-.5p`. Used for die heads
 - G04Fn dwell in seconds, minimum .1 (2.20). The manual's tapping example feeds out after a dwell without restating F; omniturn-cam restates it anyway. Never use a dwell for loading or unloading (manual: unsafe).
 
 ## Geometry helpers
 - Auto chamfer/radius on line-to-line corners: `C` or `R` with the absolute size on the move to the theoretical sharp corner. Lines only, not arcs (2.14)
 - Tool nose radius comp: G41/G42/G40, radius value stored in secondary offset `Dn`; turn on with a move carrying Dn; lead off the part by more than 2× TNR before G40 (2.31–2.36). Manual's OD example cutting toward the chuck uses G41.
+- Comp rules from the bullet list on p2.31–2.32 (Stage 5, issue #40). That list is set in an embedded font that the PDF text copy garbles; it was decoded for this issue. **Check the wording against the printed p2.31–2.32** before marking it CONFIRMED:
+  - G41/G42 goes on a line by itself, before a linear move; the D word goes on the linear move after it (2.31).
+  - G40 goes on a line by itself after the move that clears the work; the move off the work must be larger than the nose radius (2.31). The p2.36 example comments that comp turns off "on the Z2 move", the move before the G40.
+  - Comp must be off before it is turned on again; to go from right to left you need a move off the part in between (2.31). Tool changes turn comp off (2.32).
+  - **Lead-in:** when comp is turned on or off, the tool must be off the part by "no less than the size of the radius" (2.32). The finish operation refuses a D-word move shorter than the nose radius (`finish.validate_machine`; the move is in Z alone, approach Z to the shape's start). This is a necessary condition, not proof: material the shape doesn't describe isn't modelled. The p2.36 example leads in .05 with a .015 radius. OD and ID use the same rule; the manual doesn't distinguish them.
+  - **Lead-off:** "The clearance move off the part must be ... at least twice the TNR value" (2.32). The post leads off 3× the nose radius (6× on diameter), at least .01 in / .25 mm radial, as before.
+- **ID lead-off and the centreline.** An ID finish leads off toward the centre, and in a bore smaller than the lead-off it now stops at X0 instead of crossing (with a warning). This is geometry, not a control rule: in a round hole the clearance from the wall is greatest at the centre and shrinks again past it. With comp on, a bore under 4× the nose radius in diameter can't give the 2× clearance at all, so the post refuses (`finish.validate`). A shape that ends on the centreline itself is left alone (like Face, which runs just past centre on purpose). Negative X is not refused in general.
 - Secondary offsets `Dn` = operator-adjustable corrections added to moves (2.59)
 
 ## Canned cycles (the controller does the roughing)
@@ -66,13 +74,15 @@ The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the 
   - C = angle infeed; `c` alone = 29° (2026 manual), `c27` = 27°, range 0–30°. The post always writes the angle explicitly
   - P = keep moving forward in Z while pulling out (no undercut); overshoots Z by as much as the X retract
   - O = single pass at finished depth; pulls out to 3×I. To re-pick a thread: part not moved in the collet, same start X and Z, same spindle speed, same P/C
-  - Retracts between passes to start + 2×I; returns to the start point at the end
+  - Retracts between passes to start + 2×I (2.24: "back away from the starting position plus two times the amount of I"); returns to the start point at the end. For an ID thread the manual doesn't show which way that is (**VERIFY**). If it is toward the centre and start − 2×I would pass X0, the post warns: it's the control's own move, so the post can't change it.
+  - The post's own ID clearance X (where the tool waits between starts and leaves from) is two first passes inside the smaller of the start X and the minor diameter. In a small bore that can come out negative; it now stops at X0, with a warning (same reasoning as the ID lead-off above). `thread.thread_clear_x`
   - Start at least .1" in front of the thread so the slide is up to speed (the ball screw needs about ½ rev); rpm × K must stay under 300 ipm
 - "Do-it-yourself" threading / thread milling: `p` alone at the end of any move starts it in sync with the spindle, e.g. `z-.25p` (2.30, CONFIRMED)
 
 ## Taps and dies
 - G84, G86 and G89 are **not** in the G4 "Codes Honored" list (p2.1–2.2), CONFIRMED on the machine: tapping and die cycles are written out long-hand. The manual's tapping method (p2.58) uses ordinary moves and needs a floating or self-releasing holder: `g95f(pitch × .95)z(depth)` → `m04` → `g04f(dwell)` → feed out → `m03`. omniturn-cam uses this for taps, solid die holders and acorn dies.
-- Releasing die heads (geometric): feed at the pitch, spindle-synced (P), to the trip point → short dwell → rapid out → `m05` → `m01` so the operator can reset the head. M01 only stops if optional stop is switched ON at the control ("O" in Automatic mode, p2.53); use M00 if the stop must always happen.
+- Releasing die heads (geometric): feed at the pitch, spindle-synced (P), to the trip point → short dwell → rapid out → `m05` → `m09` → `m01` so the operator can reset the head. M01 only stops if optional stop is switched ON at the control ("O" in Automatic mode, p2.53); use M00 if the stop must always happen.
+- **Coolant at operator stops (Stage 5).** M00 "does not cancel active M functions" (Codes Honored list, p2.53), so coolant kept running while the operator reached in. Axial pass now writes `m09` before its stop (*Coolant off for the stop*, on by default, independent of *Stop spindle for the stop*). The post records the M09, so the next operation that uses coolant writes `m08` again. With optional stop OFF the M01 is skipped but the M05/M09 still run; the next tool restarts both. Whether coolant really keeps running through an M00/M01 on this control: **VERIFY** (docs/machine-verification.md, test 9).
 
 ## Subroutines (2.55; "Using External Sub-routines", Dec 2024)
 - `}n` begins subroutine n and `m99` ends it, each alone on its line. `m98Pn` calls it. Subroutines go after M30, and each number may be defined only once.
@@ -139,6 +149,23 @@ Checked before any code is written (docs/ARCHITECTURE.md, "Validation"). Only li
 - Axis encoders: 4000 counts per .2" of travel = .00005" per count, so .0001" on diameter. That matches the 4-place diameter output.
 - Spindle encoder: 4000 counts per rev plus a marker. Everything per-rev (G95, G33, G83) depends on it. Ctrl-S in Jog mode checks it.
 
+## Program start: the safe-start block (Stage 5)
+The header writes `g40`, `g70`/`g71`, `g90g72g94g97f300` (or the metric rapid): comp cancelled, units, absolute, diameter, feed per minute, rpm mode, rapid feed. That is every mode the post relies on before the first tool call. It doesn't write M05 or M09, on purpose:
+- A program can start right after one that ended with M02, which leaves the spindle and coolant on (2.58). Bar-feed and loader work uses that to keep the spindle running between parts; a stop and restart every cycle would change that workflow without the operator asking.
+- The first operation writes its spindle (`m03s..`/`m04s..`) and coolant (`m08` *or* `m09`, since both are unknown at the start) before its first feed move. So nothing cuts in an unknown spindle or coolant state; only the tool call and the approach in free air happen first.
+- A considered alternative block, `g40` / `g70` / `g90g72g94g97f300` / `m05` / `m09`, is **not** used. If Jeff wants it for this shop's workflow it's a one-line change, but it needs his decision and test 2 in docs/machine-verification.md first.
+- **VERIFY:** whether the G4 resets any modes at cycle start or after Esc (Esc "will turn off M functions", p4.15). The post assumes nothing either way. `tests/test_machine_safety.py` pins the header so a change has to be argued for.
+
+## Stock length and tool clearance (warnings only, Stage 5)
+F1's *Length out of collet* (`Stock.length`) is now used. After the program is written, the travel check reads it back and warns when any tool's programmed Z reaches the collet face (`OmniTurnPost.check_stock_length`):
+- **Known:** every programmed Z per tool, including canned cycles and contour subroutines (the backplot reads them).
+- **Assumed:** the bar end is at Z0, or in front of it by the largest Face operation stock; the collet face is *length* behind the bar end. Each warning prints both.
+- **Not modelled:** tool holders and boring bar shanks, the drill point, which side of a grooving or cutoff blade is its reference edge, tool offsets. A blade with a `width` gets a conditional warning ("if Z is the face-side edge..."). A program can pass and still hit, so this is never an error and never a collision check.
+- Blank length: no check, no warning. Future work, if it's wanted: a tool/stock envelope model (holder length and diameter per tool, blade reference edge, collet nose diameter) as separate optional fields. Not built here.
+
+## Operation exit contract
+Every built-in operation ends where a Z-alone retract to the tool-change Z is in free air, with comp off (G40) and rpm mode (G97). The table and the reasons are in docs/ARCHITECTURE.md (invariant 8); `tests/test_machine_safety.py` checks each registered operation against it.
+
 ## Program end
-- M30 ends and cancels active M functions; M02 ends without cancelling; M00 program stop
+- M30 ends and cancels active M functions; M02 ends without cancelling; M00 program stop, which "does not cancel active M functions" (Codes Honored list, 2.53)
 - Collet: M12 clamp, M13 unclamp. Coolant M08/M09
