@@ -59,7 +59,7 @@ The only kernel-specific calls are the three in `kernels/`:
 | `operations/` | One module per operation type: its dataclass (what the operator fills in), its field labels, menu entry, tool kinds, process-list summary, tool-based defaults and its OmniTurn emitter, registered as one `SPEC = OpSpec(...)`. The package finds the modules itself. `OPERATION_TYPES` maps the job-file `type` to the class |
 | `ops.py` | The operation classes under their old import path (re-exports `operations/`) |
 | `fields.py` | Labels, units and help text for the fields several operations share; builds `OP_MENU`, `OP_TOOL_KINDS` and `OVERRIDES` from the specs. The GUI builds its forms from this |
-| `gcode.py` | Number format, comment rules and `PostError`, shared by the post and the operations |
+| `gcode.py` | Number format, comment rules, `PostError`, and how a program line is read: `code_part()` and `subroutine_start()`, the one definition of a `}n` declaration that lint, the backplot, `Job.external_subs` and `post/external.py` all use |
 | `validation.py` | The validation vocabulary: `Issue`, `ValidationError`, type checks from type hints, the per-quantity rules (feeds > 0...), `CheckContext`. Imports nothing from the project (the operation modules import it while `operations/` is loading) |
 | `opcheck.py` | Runs the three validation layers over a job's operations; called by `Job.issues()` |
 | `tools.py` | Tool library (`tools.toml`) and the tool plate (`Setup` of `Station`s, with D offsets) |
@@ -68,7 +68,7 @@ The only kernel-specific calls are the three in `kernels/`:
 | `post/state.py` | `MachineState`: every mode the post relies on, the slide position and the tool, each known or `UNKNOWN` (a value that refuses to be used as true or false) |
 | `post/external.py` | Reads raw lines and include-file subroutines and says which `MachineState` fields they could change. Only ever forgets; anything it can't account for forgets everything |
 | `lint.py` | Checks any program (generated or hand-written) against the manual's formatting rules |
-| `backplot.py` | Interprets a program back into moves for drawing and for the travel check |
+| `backplot.py` | Interprets a program back into moves for drawing and for the travel check. Never guesses: anything it can't read truthfully is a `ProgramError` with the line number (`UnsupportedProgram` for legal code it can't follow); arcs (R or I/K) are drawn round the centre the words give, with a rounding allowance worked out from the program's decimals |
 | `stepimport.py`, `meshimport.py`, `modelimport.py` | 3D model → OD/ID profiles |
 | `cli.py` | `omniturn-cam post / lint / plot / gui / step` |
 | `gui/` | `app.py` main window and F-key bar; `screens/` one module per F-key step screen (job, shape, plate, processes, check, program); `forms.py` builds an operation's form from its fields; tool library editor, STEP dialog |
@@ -82,7 +82,9 @@ These hold for every program the post writes. Each has a test.
    (`tests/test_golden.py`)
 2. **Output follows the manual.** Every generated program passes `lint` with no
    errors before it is returned; a rule break raises `PostError` instead of
-   writing code. Rules with page references: `docs/omniturn-post-rules.md`.
+   writing code. Lint runs before the travel check reads the program back
+   (`post()`), so nothing malformed reaches the interpreter. Rules with page
+   references: `docs/omniturn-post-rules.md`.
 3. **Errors refuse, they don't guess.** When the post can't do what was asked
    safely (wrong quadrant, thread feed over the limit, no D offset for comp),
    it raises `PostError` with what's wrong and the manual page. Questionable
@@ -130,6 +132,14 @@ tools (`Tool.issues`, run when a `Tool` is made) and machine profiles
 (`MachineConfig.issues`, run when one is made; `MachineConfig.load` adds the
 file and section) use the same `Issue`. A machine profile the operator asked
 for (`--machine`, or their ~/.config file) that can't be used is always fatal.
+
+Precision: shapes are kept at full precision and checked with
+`geometry.LENGTH_TOL` (floating-point noise only); numbers are rounded only
+when the program is written (`MachineConfig.decimals`). Model import rounds to
+`stepimport.IMPORT_DECIMALS` just to clear float noise, and the comment there
+shows that rounding can't move an arc across `LENGTH_TOL`. Reading a written
+program back (`backplot.py`) allows for the rounding the program's decimals
+imply, and no more.
 
 ## Units
 

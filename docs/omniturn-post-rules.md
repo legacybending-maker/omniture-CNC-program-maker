@@ -20,6 +20,7 @@ The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the 
 - One M code per line; one one-shot G code per line; S and F can go on any line (2.6)
 - Decimal-point programming; leading/trailing zeros optional. Diameter mode X resolution .0001 (2.6). Metric display is four-place (2.37)
 - Block skip: `/` at the start of a line (2.6)
+- A word is a letter and its number (2.6). Lint refuses (issue #36), as following from that rather than from a separate manual rule: characters that aren't part of any word (`;`, a degree sign), anything that isn't ASCII, a number that can't be read (`x1.2.3`, `x-`), a letter that needs a number but has none (`x`, `g`, `t`...), and a negative F or S. Bare letters the manual itself uses stay legal: `P` at the end of a move (2.11, 2.30), `O` and `C` in a G33 (2.23–2.29), `RF`, `LF`, `LS`. Before this, the readers skipped what they couldn't match, so a typo could be ignored by the backplot and the post's handoff reader while the control read something else.
 
 ## Modal vs one-shot (2.6)
 - Modal: all M codes, G10 G70 G71 G72 G73 G76 G77 G90 G91 G94 G95 G96 G97
@@ -30,6 +31,8 @@ The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the 
 - Z: toward spindle is minus
 - **Arc direction (CONFIRMED):** the manual's I/K examples fix it, and the p2.43 drawing shows a raised bead that matches. A convex face-to-OD corner from X.2 Z0 to X.5 Z-.15 with centre at X.2 Z-.15 is `G02X.5Z-.15I0K-.15`; on a print (face right, X+ up) that arc runs counter-clockwise. So **print-CCW = G02, print-CW = G03**, consistent with the OmniTurn's X+ pointing down. omniturn-cam stores arcs in print terms and maps them in `MachineConfig.arc_codes`. Still worth one look on the F4 Verify screen.
 - I and K are incremental from the arc START to the centre; I is a radial distance even in G72 diameter mode (2.19 G03 example: X.2→X.4 with I.1).
+- `arc_format` in machine.toml picks R or I/K output. The post writes R arcs as the minor (≤ 180°) arc. The backplot (and so the travel check) reads both formats back (issue #36): R as that minor arc; I/K around centre = start + (K, I), drawn exactly round the written centre, any sweep. An I/K arc needs both I and K (`I0`/`K0` for a zero offset); the manual's examples always write both, and whether the control treats a missing one as 0 isn't stated (**VERIFY**), so the backplot doesn't assume it. A negative R isn't drawn (the manual doesn't say what it means, **VERIFY**).
+- Reading an arc back allows for rounding: numbers written to *d* decimals can each be off by half a step, so an R arc's chord may exceed 2R, or an I/K centre may sit unequal distances from the two ends, by the sum of those half-steps (worked out in `backplot._arc`). Anything beyond that is an arc that can't exist and is refused. The shape itself is checked at full precision before any code is written (`Profile.issues`), so this allowance only ever covers the post's own rounding, never a bad shape.
 
 ## Tool calls (2.9)
 - Two blocks: `tN` (1–32), then a line with BOTH X and Z. Call to a safe Z first, then approach.
@@ -73,6 +76,9 @@ The reference machine is a **Hardinge HLV-H toolroom lathe retrofitted with the 
 
 ## Subroutines (2.55; "Using External Sub-routines", Dec 2024)
 - `}n` begins subroutine n and `m99` ends it, each alone on its line. `m98Pn` calls it. Subroutines go after M30, and each number may be defined only once.
+- A comment may follow on the `}n` line, e.g. `}1 (LOADER)`: comments may sit on any line (2.6), and lint has always read it as subroutine 1. Since issue #36 every reader (lint, the backplot, the include-file reader, the handoff analyser) uses the same function, `gcode.subroutine_start`, so they agree. Whether the control itself accepts a comment there isn't shown in the manual's examples (**VERIFY**); the post never writes one.
+- Subroutine numbers are compared as numbers: `}01` is subroutine 1 and `m98p01` calls it. omniturn-cam never writes a leading zero, and lint warns about one, because the manual only shows `}n` (**VERIFY** what the control does with `}01`). Treating them as equal is the safe side: the post won't number a contour onto `}01`, and two subroutines that might be the same number are reported as a duplicate.
+- Lint errors: a subroutine that starts before the previous one's `m99`, and one that never ends. A bare `m99` with no subroutine open is a warning: what it does in the main program isn't in the manual (**VERIFY**), and the post never writes one.
 - **Subroutine 1 is special:** `M95` jumps to subroutine 1 when loader input HDR112 is shorted. M97InCnPn (PLC option) jumps conditionally to any subroutine.
 - Shops keep reusable subroutine files (ZipLoader / bar-load routines), usually numbered from 1, and paste them below M30 with the control's editor (Alt-E, "Paste From"). omniturn-cam can copy such a file in itself (job setting `include_subs`). Its own contour subroutines are numbered past any number the file uses, starting at `first_sub` in machine.toml.
 - If a subroutine file will be pasted on the control instead, set `first_sub` above its numbers so they don't clash. The linter flags duplicate subroutine numbers, and M95 with no subroutine 1.
@@ -121,6 +127,13 @@ Checked before any code is written (docs/ARCHITECTURE.md, "Validation"). Only li
 
 ## Files on the control (External Sub-routines sheet)
 - The control runs DOS. The USB stick is `D:`, programs live in `C:\PROGRAMS`, and saved subroutine files can go in `C:\RUNFILES`. File names are 8 characters. omniturn-cam writes CRLF line endings.
+
+## Reading programs back (backplot.py, issue #36)
+`post()` lints every program, then reads it back with the backplot interpreter for the travel check (lint first, so a malformed program gets lint's message rather than reaching the reader). `omniturn-cam plot` and F5 use the same reader. It never guesses:
+- A move is drawn only from a position the program has given; the first X and Z just set it. In a G75/G78 contour subroutine, lines with no X or Z (an `m10`, a G code alone) are passed over, and the contour starts at the first line that gives both X and Z. A contour whose first move gives only one, or starts with an arc, is refused.
+- Lines it can't read (see "File format"), malformed `}` lines, duplicate, unclosed or overlapping subroutines, a G75/G78 calling a subroutine that isn't there, and impossible arcs are `ProgramError`s with the line number. The post refuses the program; `plot` exits with an error.
+- Legal code it can't follow (an X/Z move while G91 incremental or G73 radius mode is in effect, a negative R) is `UnsupportedProgram`. The travel check then warns "travel not checked" and the program is still made: the check is advisory, and these only come from raw code the operator wrote.
+- M98 calls aren't followed in the drawing (the handoff analyser reads them for modal state).
 
 ## Resolution (G4 Diagnostics sheet)
 - Axis encoders: 4000 counts per .2" of travel = .00005" per count, so .0001" on diameter. That matches the 4-place diameter output.
