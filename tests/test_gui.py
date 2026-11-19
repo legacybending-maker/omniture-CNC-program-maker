@@ -233,3 +233,35 @@ def test_changing_units_keeps_values_and_new_processes_use_the_new_units(win):
     win.screens[3]._add("face")
     added = win.job.operations[-1]
     assert added.feed == 0.08  # mm/rev, not .003
+
+
+# ---------------------------------------------------------------- F5 backplot (issue #36)
+def _canvas_text(screen) -> str:
+    """The text a PlotCanvas.message() put on the plot, if any."""
+    return " ".join(t.get_text() for ax in screen.canvas.figure.axes for t in ax.texts)
+
+
+def test_check_screen_backplots_with_the_machines_arc_format(win):
+    """F5 draws with the machine the program was made for. An I/K machine
+    used to crash F5 (and the post) with KeyError 'r'."""
+    win.open_job(EX / "manual_g75.toml")
+    win.machine_path.write_text('arc_format = "ik"\n')
+    win.show_screen(4)
+    assert win.last_error == "" and win.last_machine.arc_format == "ik"
+    assert "can't draw" not in _canvas_text(win.screens[4])
+
+
+def test_check_screen_shows_a_backplot_problem_instead_of_crashing(win, monkeypatch):
+    """If the interpreter ever can't read a program, F5 says so on the plot
+    rather than raising into Qt."""
+    import omniturn_cam.gui.screens.check as check
+    from omniturn_cam.backplot import ProgramError
+
+    def broken(*a, **k):
+        raise ProgramError(7, "made-up problem")
+
+    monkeypatch.setattr(check, "draw", broken)
+    win.open_job(EX / "manual_g75.toml")
+    win.show_screen(4)
+    assert "can't draw this program" in _canvas_text(win.screens[4])
+    assert "line 7: made-up problem" in _canvas_text(win.screens[4])
