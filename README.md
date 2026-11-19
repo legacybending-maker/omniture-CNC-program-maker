@@ -63,7 +63,7 @@ the bottom:
 | Key | Screen | What you fill in |
 |---|---|---|
 | F1 | Job & Blank | program name (8 chars max, becomes the file name), units, bar diameter, existing bore, a subroutine file to copy in below M30 (e.g. ZipLoader subs) |
-| F2 | Part Shape | the contour as a table of lines and arcs, with a live preview |
+| F2 | Part Shape | the contour as a table of lines and arcs, with a live preview. If an edit makes the shape invalid, a red notice says why and F5/F6 make no program until it's fixed (or **Undo changes** puts the last valid shape back) |
 | F3 | Tool Plate | which library tool sits at which T number, and its D offset for nose radius comp |
 | F4 | Processes | face, box rough (G74), rough (G75/G78), finish, drill/peck, thread (G33), tap / solid die, axial pass (box tool, releasing die head), radial pass, cutoff, call subroutine (M98), raw program lines |
 | F5 | Check | backplot of the generated code plus the OmniTurn rules check |
