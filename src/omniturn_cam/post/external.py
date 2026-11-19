@@ -26,6 +26,7 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields
 
+from ..gcode import code_part, subroutine_start
 from .state import POSITION, MachineState
 
 # Every field of MachineState: "forget everything".
@@ -114,7 +115,6 @@ LETTER_EFFECTS: dict[str, frozenset[str]] = {
 # A word is a letter and an optional number, e.g. g01, x-.5, p, t12.
 _WORD = re.compile(r"([a-z])([-+]?[0-9]*\.?[0-9]*)")
 _LOOP = re.compile(r"ls\d*|lf")  # LSn / LF loop start and finish (p2.20-2.21)
-_SUB_START = re.compile(r"^\s*\}(\d+)\s*$")
 
 
 @dataclass(frozen=True)
@@ -149,25 +149,26 @@ def _all(reason: str) -> Effects:
     return Effects(EVERYTHING, reason)
 
 
-def _clean(line: str) -> str:
-    """Code part of a line: no comments, lower case, no spaces, no block skip."""
-    code = re.sub(r"\([^)]*\)", "", line)
-    return code.lower().replace(" ", "").lstrip("/")
+# The code part of a line, read the same way lint and the backplot read it
+# (gcode.code_part: no comments, lower case, no spaces, no block skip).
+_clean = code_part
 
 
 def subroutine_bodies(text: str) -> dict[int, list[str]]:
     """Map subroutine number -> its lines, from a subroutine file (``}n`` ... ``m99``).
 
     Lines outside any subroutine are ignored. A number defined twice keeps the
-    first body; the linter reports the duplicate (p2.55).
+    first body; Job.issues and the linter report the duplicate (p2.55).
+    Declarations are read with gcode.subroutine_start, so ``}1 (LOADER)`` is
+    subroutine 1 here as everywhere else (issue #36).
     """
     bodies: dict[int, list[str]] = {}
     current: list[str] | None = None
     for line in text.splitlines():
-        m = _SUB_START.match(line)
-        if m:
+        num = subroutine_start(_clean(line))
+        if num is not None:
             current = []
-            bodies.setdefault(int(m.group(1)), current)
+            bodies.setdefault(num, current)
             continue
         if current is not None:
             if _clean(line) == "m99":
