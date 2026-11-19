@@ -48,7 +48,7 @@ class PlateScreen(Screen):
         self.table.setRowCount(len(stations))
         tools = list(self.win.library)
         for r, st in enumerate(stations):
-            t = NumberEdit(st.t, integer=True)
+            t = NumberEdit(st.t, integer=True, label=f"T{st.t} station number")
             t.valueChanged.connect(lambda v, st=st: self._renumber(st, v))
             self.table.setCellWidget(r, 0, t)
             cb = QComboBox()
@@ -57,7 +57,7 @@ class PlateScreen(Screen):
             cb.setCurrentIndex(max(0, cb.findData(st.tool.id)))
             cb.currentIndexChanged.connect(lambda _i, cb=cb, st=st: self._tool(st, cb.currentData()))
             self.table.setCellWidget(r, 1, cb)
-            d = NumberEdit(st.d, optional=True, integer=True, placeholder="none")
+            d = NumberEdit(st.d, optional=True, integer=True, placeholder="none", label=f"T{st.t} D offset")
             d.valueChanged.connect(lambda v, st=st: self._d(st, v))
             self.table.setCellWidget(r, 2, d)
             size = st.tool.diameter if st.tool.diameter else st.tool.nose_radius
@@ -68,16 +68,30 @@ class PlateScreen(Screen):
         self.table.resizeRowsToContents()
 
     def _add(self):
+        if not self.win.commit_edits():  # refresh() below rebuilds the table
+            return
         if not len(self.win.library):
             QMessageBox.warning(self, "Tool plate", "The tool library is empty - add tools first (F8).")
             return
         used = set(self.job.setup.stations)
-        t = next(n for n in range(1, 33) if n not in used)
+        # next(..., None): the default makes next() return None when there's
+        # no free number, instead of raising StopIteration (which used to
+        # escape this button with all 32 stations in use).
+        t = next((n for n in range(1, 33) if n not in used), None)
+        if t is None:
+            QMessageBox.warning(
+                self,
+                "Tool plate",
+                "All 32 stations (T1-T32, manual p2.9) already have a tool. Remove one to add another.",
+            )
+            return
         self.job.setup.add(Station(t, next(iter(self.win.library))))
         self.win.touched()
         self.refresh()
 
     def _remove(self):
+        if not self.win.commit_edits():
+            return
         r = self.table.currentRow()
         if r < 0:
             return
@@ -95,6 +109,9 @@ class PlateScreen(Screen):
 
     def _renumber(self, st, v):
         if v is None or not 1 <= v <= 32 or v in self.job.setup.stations:
+            # Say why the number went back instead of quietly undoing it.
+            why = "is already used" if v in self.job.setup.stations else "must be 1-32 (manual p2.9)"
+            QMessageBox.warning(self, "Tool plate", f"T{st.t} can't become T{fmt_num(v)}: that number {why}.")
             self.refresh()
             return
         old = st.t

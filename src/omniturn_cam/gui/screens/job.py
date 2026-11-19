@@ -12,15 +12,20 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
 )
 
 from ...job import NAME_RE
-from ..widgets import UNIT_SUFFIX, NumberEdit
+from ..widgets import UNIT_SUFFIX, CommitLineEdit, NumberEdit
 from .base import Screen
+
+
+def _name_problem(text: str) -> str | None:
+    if NAME_RE.fullmatch(text.strip().upper()):
+        return None
+    return f"{text.strip()!r} must be 1-8 letters, digits, _ or - (it becomes the file name, manual p2.8)"
 
 
 class JobScreen(Screen):
@@ -34,12 +39,16 @@ class JobScreen(Screen):
 
         g = QGroupBox("Program")
         f = QFormLayout(g)
-        self.name = QLineEdit()
+        # CommitLineEdit (widgets.py): committed before any F-key, so a name
+        # typed and not yet "finished" still reaches the job. A name that
+        # isn't valid is refused there, with this message, instead of being
+        # left red on screen while the job keeps the old one.
+        self.name = CommitLineEdit(check=_name_problem, label="Program name")
         self.name.setMaxLength(8)
         self.name.setToolTip("Becomes the file name on the USB stick: 1-8 letters or digits (manual p2.8)")
-        self.name.editingFinished.connect(self._name)
-        self.desc = QLineEdit()
-        self.desc.editingFinished.connect(lambda: self._set("description", self.desc.text()))
+        self.name.committed.connect(self._name)
+        self.desc = CommitLineEdit(label="Description")
+        self.desc.committed.connect(lambda text: self._set("description", text))
         self.units = QComboBox()
         self.units.addItems(["inch", "metric"])
         self.units.currentTextChanged.connect(self._units)
@@ -47,13 +56,13 @@ class JobScreen(Screen):
         f.addRow("Description", self.desc)
         f.addRow("Units", self.units)
         subrow = QHBoxLayout()
-        self.subs = QLineEdit()
+        self.subs = CommitLineEdit(label="Subroutine file")
         self.subs.setPlaceholderText("none")
         self.subs.setToolTip(
             "A file of saved subroutines (e.g. ZipLoader / bar-load subs) copied in below M30. "
             "Generated contour subroutines are numbered around it."
         )
-        self.subs.editingFinished.connect(lambda: self._set("include_subs", self.subs.text().strip() or None))
+        self.subs.committed.connect(lambda text: self._set("include_subs", text.strip() or None))
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse_subs)
         subrow.addWidget(self.subs, 1)
@@ -67,13 +76,13 @@ class JobScreen(Screen):
 
         g = QGroupBox("Blank (bar stock)")
         f = QFormLayout(g)
-        self.material = QLineEdit()
-        self.material.editingFinished.connect(lambda: self._stock("material", self.material.text()))
-        self.dia = NumberEdit(optional=False)
+        self.material = CommitLineEdit(label="Material")
+        self.material.committed.connect(lambda text: self._stock("material", text))
+        self.dia = NumberEdit(optional=False, label="Bar diameter")
         self.dia.valueChanged.connect(lambda v: self._stock("diameter", v))
-        self.length = NumberEdit(optional=True, placeholder="optional")
+        self.length = NumberEdit(optional=True, placeholder="optional", label="Length out of collet")
         self.length.valueChanged.connect(lambda v: self._stock("length", v))
-        self.bore = NumberEdit(optional=True, placeholder="none")
+        self.bore = NumberEdit(optional=True, placeholder="none", label="Existing bore")
         self.bore.valueChanged.connect(lambda v: self._stock("bore", v))
         f.addRow("Material", self.material)
         f.addRow("Bar diameter", self.dia)
@@ -100,23 +109,28 @@ class JobScreen(Screen):
             self, "Subroutine file", str(Path.home()), "OmniTurn programs (*.cnc *.txt *);;All files (*)"
         )
         if path:
-            self.subs.setText(path)
+            self.subs.setCommitted(path)
             self._set("include_subs", path)
 
     def _stock(self, attr, v):
         setattr(self.job.stock, attr, v)
         self.win.touched()
 
-    def _name(self):
-        txt = self.name.text().strip().upper()
-        self.name.setText(txt)
-        ok = bool(NAME_RE.fullmatch(txt))
-        self.name.setStyleSheet("" if ok else "QLineEdit { border: 2px solid #d33; }")
-        if ok and txt != self.job.name:
+    def _name(self, text):
+        txt = text.strip().upper()
+        self.name.setCommitted(txt)  # shown in capitals, as the file will be named
+        if txt != self.job.name:
             self._set("name", txt)
 
     def _units(self, u):
         if u != self.job.units:
+            # refresh() below reloads every field from the job, so anything
+            # typed and not yet committed goes in first (or the change waits).
+            if not self.win.commit_edits():
+                self.units.blockSignals(True)
+                self.units.setCurrentText(self.job.units)
+                self.units.blockSignals(False)
+                return
             self.job.units = u
             self.win.touched()
             self.refresh()
@@ -134,9 +148,9 @@ class JobScreen(Screen):
 
     def refresh(self):
         j = self.job
-        self.name.setText(j.name)
-        self.desc.setText(j.description)
-        self.subs.setText(j.include_subs or "")
+        self.name.setCommitted(j.name)
+        self.desc.setCommitted(j.description)
+        self.subs.setCommitted(j.include_subs or "")
         self.units.blockSignals(True)
         self.units.setCurrentText(j.units)
         self.units.blockSignals(False)
@@ -147,7 +161,7 @@ class JobScreen(Screen):
         self.dia.setValue(j.stock.diameter)
         self.length.setValue(j.stock.length)
         self.bore.setValue(j.stock.bore)
-        self.material.setText(j.stock.material)
+        self.material.setCommitted(j.stock.material)
         self.units_note.setText(
             "Changing units relabels fields; it does not convert numbers already entered. "
             "Processes added after the change start with values for the new units."
