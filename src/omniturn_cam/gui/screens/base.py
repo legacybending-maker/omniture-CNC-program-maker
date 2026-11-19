@@ -35,5 +35,12 @@ class Screen(QWidget):
     def refresh(self):
         pass
 
+    def blocking_problem(self) -> str | None:
+        """An edit on this screen that couldn't go into the job (so the job
+        isn't what the screen shows), or None. MainWindow refuses to make a
+        program while any screen has one. Screens that can hold such an edit
+        override this (ShapeScreen)."""
+        return None
+
 
 # =========================================================================== 1

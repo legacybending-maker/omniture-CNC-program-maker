@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from ...fileio import write_text_atomic
 from .base import Screen, _buttons
 
 
@@ -67,9 +68,24 @@ class ProgramScreen(Screen):
                 "prove out with F4 Verify and single block before running."
             )
 
-    def _write(self, path: Path):
-        path.write_text(self.code.replace("\n", "\r\n"))  # DOS line endings for the OmniTurn
+    def _write(self, path: Path) -> bool:
+        """Write the program with DOS line endings for the OmniTurn (p2.8).
+
+        Atomic (fileio.py), and "Wrote" is only shown once the file is on the
+        stick: a pulled stick or a full one used to raise out of this button
+        with a half-written program left behind."""
+        try:
+            write_text_atomic(path, self.code, newline="\r\n")
+        except OSError as e:
+            QMessageBox.warning(
+                self,
+                "Save program",
+                f"Could not write {path}:\n{e.strerror or e}\n\nNothing was written. "
+                "Check the USB stick is in and not full or write-protected, then try again.",
+            )
+            return False
         QMessageBox.information(self, "Saved", f"Wrote {path}")
+        return True
 
     def _usb(self):
         if not self.code:

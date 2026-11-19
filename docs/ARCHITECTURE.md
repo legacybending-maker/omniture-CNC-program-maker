@@ -63,7 +63,8 @@ The only kernel-specific calls are the three in `kernels/`:
 | `validation.py` | The validation vocabulary: `Issue`, `ValidationError`, type checks from type hints, the per-quantity rules (feeds > 0...), `CheckContext`. Imports nothing from the project (the operation modules import it while `operations/` is loading) |
 | `opcheck.py` | Runs the three validation layers over a job's operations; called by `Job.issues()` |
 | `tools.py` | Tool library (`tools.toml`) and the tool plate (`Setup` of `Station`s, with D offsets) |
-| `job.py` | `Job`: units, stock, setup, named profiles, ordered operations. Reads/writes job TOML, `JOB_FORMAT` version |
+| `fileio.py` | `write_text_atomic` / `write_bytes_atomic`: write to a temporary file beside the target, fsync, then `os.replace`, so a failed save never leaves a half-written job, library or program. Used by `save_job`, `ToolLibrary.save`, the GUI's program writer and `post -o` |
+| `job.py` | `Job`: units, stock, setup, named profiles, ordered operations. Reads/writes job TOML, `JOB_FORMAT` version. `include_subs` is kept as written; `base_dir` (the job file's folder, not saved) resolves a relative one (`Job.include_path`) |
 | `post/omniturn.py` | `MachineConfig` (machine.toml) and `OmniTurnPost`: header/footer, motion and tool-call helpers the operations use, the mode-establishing helpers, the handoff to raw code and M98 (`park_before_handoff`, `resume_after`), subroutines below M30. Dispatches each operation to its spec's `emit` |
 | `post/state.py` | `MachineState`: every mode the post relies on, the slide position and the tool, each known or `UNKNOWN` (a value that refuses to be used as true or false) |
 | `post/external.py` | Reads raw lines and include-file subroutines and says which `MachineState` fields they could change. Only ever forgets; anything it can't account for forgets everything |
@@ -71,7 +72,7 @@ The only kernel-specific calls are the three in `kernels/`:
 | `backplot.py` | Interprets a program back into moves for drawing and for the travel check. Never guesses: anything it can't read truthfully is a `ProgramError` with the line number (`UnsupportedProgram` for legal code it can't follow); arcs (R or I/K) are drawn round the centre the words give, with a rounding allowance worked out from the program's decimals |
 | `stepimport.py`, `meshimport.py`, `modelimport.py` | 3D model → OD/ID profiles |
 | `cli.py` | `omniturn-cam post / lint / plot / gui / step` |
-| `gui/` | `app.py` main window and F-key bar; `screens/` one module per F-key step screen (job, shape, plate, processes, check, program); `forms.py` builds an operation's form from its fields; tool library editor, STEP dialog |
+| `gui/` | `app.py` main window and F-key bar; `screens/` one module per F-key step screen (job, shape, plate, processes, check, program); `forms.py` builds an operation's form from its fields; `widgets.py` the committing editors; tool library editor, STEP dialog. See "The GUI and the job" |
 
 ## Invariants
 
@@ -166,6 +167,36 @@ job's units once, when the shape is made. `Tool.units` is stored but not
 used, so tool library values (nose radius, diameter, `pitch`) are taken in
 the job's units as written. What this means for the operator is in the
 README, "Inch and metric".
+
+## The GUI and the job
+
+The standalone GUI edits `MainWindow.job` in place; the core never sees a
+widget. Three rules keep what the operator sees and what the job holds the
+same (issue #38, `tests/test_gui.py`):
+
+1. **Edits are committed before anything reads the job.** Every editor that
+   can hold typed-but-unfinished text has `commit_edit()` (`widgets.py`:
+   `NumberEdit`, `CommitLineEdit`, `EditTable`). `MainWindow.commit_edits()`
+   calls it on every widget of the current screen before an F-key, a save,
+   F8, or a list change that rebuilds a form. An unusable entry stops the
+   action, names the field and stays on screen; it's never rounded or
+   dropped.
+2. **An edit that can't go into the job is explicit state, and blocks.** A
+   screen whose content can't become valid job data (F2 with an invalid
+   shape) returns it from `blocking_problem()`. While any screen does,
+   `generate()` makes no program and saving asks first. F2 keeps the table
+   as typed across screens and offers Undo changes.
+3. **Dialogs edit copies.** The tool library dialog works on a deep copy and
+   hands back `saved` only after the file is written; `MainWindow` then
+   points the stations at the saved tools. Closing without saving changes
+   nothing.
+
+At the UI boundary, expected failures (bad file contents: `ValueError`,
+`KeyError`; files that can't be read or written: `OSError`) become messages
+that say what to do. Anything else is a bug: logged with its traceback to
+`~/.config/omniturn-cam/omniturn-cam.log` and reported as an internal error,
+never shown as a problem with the operator's file. Message boxes go through
+`notify`, `ask` and `save_question` so tests can answer them.
 
 ## Where machine facts live
 

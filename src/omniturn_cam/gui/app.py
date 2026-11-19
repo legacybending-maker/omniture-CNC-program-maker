@@ -7,8 +7,10 @@ F5 Check         F6 Program      F7 Save job     F8 Tool library
 from __future__ import annotations
 
 import html
+import logging
 import shutil
 import sys
+import traceback
 from importlib import resources
 from pathlib import Path
 
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import isValid
 
 from ..geometry import Point, Profile
 from ..job import Job, Stock, load_job, save_job
@@ -34,8 +37,12 @@ from ..post.omniturn import MachineConfigError
 from ..tools import Setup, ToolLibrary
 from .screens import CheckScreen, JobScreen, PlateScreen, ProcessScreen, ProgramScreen, ShapeScreen
 from .toollib import ToolLibraryDialog
+from .widgets import EditTable
 
 CONFIG_DIR = Path.home() / ".config" / "omniturn-cam"
+# Unexpected errors (bugs) are written here with their full traceback, so a
+# developer can see what happened after the operator has closed the message.
+log = logging.getLogger("omniturn_cam.gui")
 STYLE = """
 QWidget { font-size: 11pt; }
 QPushButton { padding: 6px 12px; }
@@ -136,6 +143,10 @@ class MainWindow(QMainWindow):
                 b.clicked.connect(self.save)
             else:
                 b.clicked.connect(self.edit_library)
+            # Every F-key goes through show_screen / save / edit_library, and
+            # each of those commits the open editors first (commit_edits). The
+            # buttons keep Qt.NoFocus so the cursor stays in the field the
+            # operator was typing in; committing is explicit instead.
             keys.addWidget(b)
             QShortcut(QKeySequence(f"F{i + 1}"), self, activated=b.click)
             self.fkeys.append(b)
@@ -150,7 +161,7 @@ class MainWindow(QMainWindow):
 
         if job_path:
             self.open_job(Path(job_path))
-        self.show_screen(0)
+        self._show(0)
 
     # ------------------------------------------------------------------ menus
     def _menus(self):
@@ -204,7 +215,84 @@ class MainWindow(QMainWindow):
         )
         self.setWindowTitle(f"omniturn-cam - {self.job.name}{star}")
 
-    def show_screen(self, n: int):
+    # Message boxes go through these three methods so the rest of the window
+    # never calls QMessageBox directly. The tests replace them to answer for
+    # the operator (a real modal dialog would wait forever with nobody there).
+    def notify(self, title: str, text: str) -> None:
+        """Tell the operator something went wrong and nothing was done."""
+        QMessageBox.warning(self, title, text)
+
+    def ask(self, title: str, text: str) -> bool:
+        """A yes/no question; True for yes."""
+        return QMessageBox.question(self, title, text) == QMessageBox.Yes
+
+    def unexpected(self, action: str, exc: BaseException) -> None:
+        """An error that is a bug in omniturn-cam, not the operator's input:
+        log the full traceback, then say so plainly. Never swallowed: the
+        operator always hears that ``action`` didn't happen."""
+        log.error("%s failed", action, exc_info=(type(exc), exc, exc.__traceback__))
+        self.notify(
+            "omniturn-cam: internal error",
+            f"{action} failed because of a problem in omniturn-cam itself, not in your job:\n\n"
+            f"{type(exc).__name__}: {exc}\n\nNothing was changed. Details are in {log_path()}. "
+            "Please report it with that file.",
+        )
+
+    def commit_edits(self, quiet: bool = False) -> bool:
+        """Push every value typed on the current screen into the job.
+
+        Finds every widget on the screen with a ``commit_edit`` method
+        (widgets.py: NumberEdit, CommitLineEdit, EditTable) and calls it.
+        Tables go first, so a typed cell reaches the shape before anything
+        reads it. Returns True when every field was usable; otherwise tells
+        the operator which fields aren't (unless ``quiet``) and returns
+        False, and the caller doesn't go on: the job would be missing what
+        the screen shows.
+        """
+        screen = self.stack.currentWidget()
+        widgets = [screen, *screen.findChildren(QWidget)]
+        widgets.sort(key=lambda w: not isinstance(w, EditTable))  # sort is stable: tables first, rest in order
+        problems = []
+        for w in widgets:
+            # Committing one field can rebuild part of the screen (a new
+            # station number re-sorts the F3 table), deleting widgets still in
+            # this list. isValid() says whether the Qt object behind a Python
+            # wrapper still exists; a deleted one has nothing to commit.
+            if not isValid(w):
+                continue
+            commit = getattr(w, "commit_edit", None)
+            if callable(commit) and (problem := commit()):
+                problems.append(problem)
+        if problems and not quiet:
+            self.notify(
+                "Fix these values first",
+                "These fields don't hold a value omniturn-cam can use, so nothing was done:\n\n- "
+                + "\n- ".join(problems)
+                + "\n\nThey are outlined in red.",
+            )
+        return not problems
+
+    def blocking_problems(self) -> list[str]:
+        """Edits on screen that couldn't go into the job (a shape that isn't
+        valid yet). While there are any, no program is made: it would come
+        from the job, not from what the operator is looking at."""
+        return [p for s in self.screens if (p := s.blocking_problem())]
+
+    def show_screen(self, n: int) -> bool:
+        """Switch to screen ``n`` (F1-F6) after committing the open editors.
+        Stays put and returns False if a field holds something unusable:
+        leaving would rebuild the next screen from the job, and the typed
+        value would be lost without a word."""
+        if not self.commit_edits():
+            self.fkeys[self.stack.currentIndex()].setChecked(True)
+            self.fkeys[n].setChecked(n == self.stack.currentIndex())
+            return False
+        self._show(n)
+        return True
+
+    def _show(self, n: int) -> None:
+        """Switch screens without committing: after loading or replacing the
+        job, when what's on screen belongs to the old one."""
         self.stack.setCurrentIndex(n)
         for i, b in enumerate(self.fkeys[:6]):
             b.setChecked(i == n)
@@ -232,7 +320,13 @@ class MainWindow(QMainWindow):
         )
 
     def generate(self) -> str | None:
+        """The program for the job as it stands, or None with the reason in
+        ``last_error``. Callers show last_error; nothing here raises."""
         self.warnings = []
+        blocking = self.blocking_problems()
+        if blocking:
+            self.last_error = "No program was made:\n" + "\n".join(blocking)
+            return None
         try:
             # The job's own problems first: a job whose units are misspelt
             # can't pick a machine section, and that is the job's fault.
@@ -249,6 +343,16 @@ class MainWindow(QMainWindow):
         except (PostError, KeyError, ValueError) as e:
             self.last_error = str(e).strip('"')
             return None
+        except OSError as e:  # the include file vanished or can't be read
+            self.last_error = f"Can't read {e.filename}: {e.strerror}. No program was made."
+            return None
+        except Exception as e:  # a bug: logged with its traceback, never hidden
+            log.error("generating the program failed", exc_info=True)
+            self.last_error = (
+                f"omniturn-cam hit an internal error and made no program: {type(e).__name__}: {e}. "
+                f"Details are in {log_path()}; please report it."
+            )
+            return None
         self.last_error = ""
         # Kept so the backplot (F5) reads arcs with this machine's G02/G03
         # mapping, the same profile the program was just made for.
@@ -257,22 +361,31 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ files
     def _confirm_discard(self) -> bool:
+        # An unusable field (or invalid shape) is an unsaved edit too.
+        if not self.commit_edits(quiet=True) or self.blocking_problems():
+            self.dirty = True
         if not self.dirty:
             return True
+        r = self.save_question()
+        if r == "save":
+            return self.save()
+        return r == "discard"
+
+    def save_question(self) -> str:
+        """Save / Discard / Cancel for unsaved changes: "save", "discard" or
+        "cancel". A method of its own, like notify and ask, so tests answer it."""
         r = QMessageBox.question(
             self,
             "Unsaved changes",
             "Save changes to this job first?",
             QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
         )
-        if r == QMessageBox.Save:
-            return self.save()
-        return r == QMessageBox.Discard
+        return {QMessageBox.Save: "save", QMessageBox.Discard: "discard"}.get(r, "cancel")
 
     def new(self):
         if self._confirm_discard():
             self.job, self.job_path, self.dirty = new_job(), None, False
-            self.show_screen(0)
+            self._show(0)
 
     def open_dialog(self):
         if not self._confirm_discard():
@@ -282,34 +395,84 @@ class MainWindow(QMainWindow):
         if path:
             self.open_job(Path(path))
 
-    def open_job(self, path: Path):
-        try:
-            self.job = load_job(path, self.library, validate=False)
-        except (KeyError, ValueError) as e:
-            QMessageBox.critical(self, "Open job", f"Could not open {path.name}:\n{e}")
-            return
-        self.job_path, self.dirty = path, False
-        self.settings.setValue("job_dir", str(path.parent))
-        self.show_screen(self.stack.currentIndex())
+    def open_job(self, path: Path) -> bool:
+        """Load the job at ``path``. Returns False, keeping the current job,
+        when it can't be loaded; the operator is told why.
 
-    def save(self) -> bool:
-        if self.job_path is None:
-            return self.save_as()
-        save_job(self.job, self.job_path)
-        self.dirty = False
-        self._banner()
+        Three kinds of failure, told apart on purpose (issue #38):
+        * ValueError / KeyError: the file is there but its contents are wrong
+          (a misspelt setting, a tool not in the library). Fix the file.
+        * OSError: the file can't be read at all (gone, a folder, no access).
+        * anything else: a bug in omniturn-cam, logged with its traceback.
+        Catching only the expected kinds by name, and reporting the rest as
+        a bug, is what keeps a real bug from looking like a bad job file.
+        """
+        try:
+            job = load_job(path, self.library, validate=False)
+        except (KeyError, ValueError) as e:
+            self.notify("Open job", f"Could not open {path.name}: the file has a problem.\n\n{str(e).strip(chr(34))}")
+            return False
+        except OSError as e:
+            self.notify("Open job", f"Could not read {path}:\n{e.strerror or e}")
+            return False
+        except Exception as e:
+            self.unexpected(f"Opening {path.name}", e)
+            return False
+        self.job, self.job_path, self.dirty = job, path, False
+        self.settings.setValue("job_dir", str(path.parent))
+        self._show(self.stack.currentIndex())
         return True
 
+    def save(self) -> bool:
+        """F7 / Ctrl+S. Returns True only when the file is written."""
+        if not self.commit_edits():
+            return False
+        if self.job_path is None:
+            return self.save_as()
+        return self._save_to(self.job_path)
+
     def save_as(self) -> bool:
+        if not self.commit_edits():
+            return False
         start = self.settings.value("job_dir", str(Path.home()))
         path, _ = QFileDialog.getSaveFileName(
             self, "Save job", f"{start}/{self.job.name}.toml", "omniturn-cam job (*.toml)"
         )
         if not path:
             return False
-        self.job_path = Path(path if path.endswith(".toml") else path + ".toml")
-        self.settings.setValue("job_dir", str(self.job_path.parent))
-        return self.save()
+        return self._save_to(Path(path if path.endswith(".toml") else path + ".toml"))
+
+    def _save_to(self, path: Path) -> bool:
+        """Write the job to ``path``. Only after the file is safely written
+        does the window take it as the job's file and clear the unsaved
+        mark; if the write fails, the job, its file name and the unsaved
+        mark all stay as they were, and the old file is untouched
+        (save_job writes atomically)."""
+        blocking = self.blocking_problems()
+        if blocking and not self.ask(
+            "Save job",
+            "\n".join(blocking) + "\n\nThe file will get the last valid shape, not the one on screen. Save anyway?",
+        ):
+            return False
+        try:
+            save_job(self.job, path)
+        except OSError as e:
+            self.notify(
+                "Save job",
+                f"Could not save to {path}:\n{e.strerror or e}\n\n"
+                "Nothing was written there and the job is still open with your changes. "
+                "Check the USB stick or folder, or use File > Save job as… to save somewhere else.",
+            )
+            return False
+        except Exception as e:
+            self.unexpected(f"Saving {path.name}", e)
+            return False
+        self.job_path = path
+        self.settings.setValue("job_dir", str(path.parent))
+        # An invalid shape on screen is still an unsaved change.
+        self.dirty = bool(blocking)
+        self._banner()
+        return True
 
     def open_library(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -325,6 +488,9 @@ class MainWindow(QMainWindow):
         except (KeyError, ValueError) as e:
             QMessageBox.critical(self, "Tool library", str(e))
             return
+        except OSError as e:
+            QMessageBox.critical(self, "Tool library", f"Could not read {path}:\n{e.strerror or e}")
+            return
         for st in self.job.setup.stations.values():
             st.tool = lib[st.tool.id]
         self.library, self.library_path = lib, Path(path)
@@ -332,10 +498,22 @@ class MainWindow(QMainWindow):
         self.show_screen(self.stack.currentIndex())
 
     def edit_library(self):
+        """F8. The dialog edits a copy of the library (a transaction): the
+        job and the library here change only when the operator saves in the
+        dialog, and then exactly to what was saved to the file."""
+        if not self.commit_edits():
+            return
         in_use = {st.tool.id for st in self.job.setup.stations.values()}
         dlg = ToolLibraryDialog(self.library, self.library_path, in_use, self)
         dlg.exec()
-        self.show_screen(self.stack.currentIndex())
+        if dlg.saved is not None:
+            self.library = dlg.saved
+            # Stations point at Tool objects. Point them at the saved ones, so
+            # the job uses what's in the file. A tool in use can't be deleted
+            # or have its ID changed in the dialog, so every ID is still there.
+            for st in self.job.setup.stations.values():
+                st.tool = self.library[st.tool.id]
+        self._show(self.stack.currentIndex())
 
     def closeEvent(self, ev):
         if self._confirm_discard():
@@ -344,8 +522,44 @@ class MainWindow(QMainWindow):
             ev.ignore()
 
 
+def log_path() -> Path:
+    return CONFIG_DIR / "omniturn-cam.log"
+
+
+def _setup_logging() -> None:
+    """Send errors to ~/.config/omniturn-cam/omniturn-cam.log as well as the
+    terminal. If the log can't be opened the program still runs."""
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    try:
+        log_path().parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(log_path(), encoding="utf-8")
+    except OSError:
+        return
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.getLogger("omniturn_cam").addHandler(handler)
+
+
+def _excepthook(kind, exc, tb) -> None:
+    """The last line of defence: an exception no slot handled. Qt would only
+    print it to a terminal nobody at the machine is looking at; this logs it
+    and tells the operator. sys.excepthook is the function Python calls for
+    an exception nothing caught."""
+    log.error("unhandled exception", exc_info=(kind, exc, tb))
+    if QApplication.instance() is not None:
+        QMessageBox.critical(
+            None,
+            "omniturn-cam: internal error",
+            f"Something went wrong inside omniturn-cam:\n\n{kind.__name__}: {exc}\n\n"
+            f"The last action may not have finished. Details are in {log_path()}.",
+        )
+    else:  # pragma: no cover - no GUI to show it in
+        traceback.print_exception(kind, exc, tb)
+
+
 def main(argv=None):
     argv = sys.argv if argv is None else argv
+    _setup_logging()
+    sys.excepthook = _excepthook
     app = QApplication(argv)
     app.setApplicationName("omniturn-cam")
     app.setStyleSheet(STYLE)

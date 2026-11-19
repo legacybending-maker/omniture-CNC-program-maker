@@ -10,14 +10,13 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QLabel,
-    QLineEdit,
     QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from ..fields import OP_MENU, form_fields, op_kind
-from .widgets import UNIT_SUFFIX, NumberEdit
+from .widgets import UNIT_SUFFIX, CommitLineEdit, NumberEdit
 
 GROUP_ORDER = ["Tool", "Shape", "Cut", "Speed"]
 NUMERIC = {"dia", "z", "len", "feed", "feed_ipm", "rpm", "sfm", "sec", "text_num", "int"}
@@ -98,6 +97,7 @@ class OperationForm(QWidget):
                 integer=info.kind in ("rpm", "int"),
                 suffix=units.get(info.kind, ""),
                 placeholder=info.blank if info.optional else "",
+                label=info.label,
             )
             ne.valueChanged.connect(lambda val: self._set(name, val))
             return ne
@@ -107,6 +107,8 @@ class OperationForm(QWidget):
             te.setFont(QFont("monospace"))
             te.textChanged.connect(lambda te=te: self._set(name, te.toPlainText()))
             return te
-        le = QLineEdit(str(v or ""))
-        le.editingFinished.connect(lambda le=le: self._set(name, le.text()))
+        # Committed on Return, on leaving the field, or by MainWindow before
+        # any F-key (widgets.py, "Committing edits").
+        le = CommitLineEdit(str(v or ""), label=info.label)
+        le.committed.connect(lambda text: self._set(name, text))
         return le

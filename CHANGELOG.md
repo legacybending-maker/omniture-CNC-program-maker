@@ -117,7 +117,41 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions:
 - A C/R corner between lines that double back is an error with line numbers
   instead of a division by zero when a hand-written program is plotted (#36).
 
+- **The GUI uses what's on screen** (#38). A value typed and not yet
+  confirmed with Return (a feed, an rpm, a shape cell, the program name) used
+  to be ignored by F5/F6/F7: the program used the old value while the field
+  showed the new one. Every F-key, save, F8 and process change now takes the
+  typed values first. A value that can't be used (`abc`, `1.5` for a station)
+  stops the action, names the field and stays on screen; whole-number fields
+  no longer round `1.5` to `2`.
+- **An invalid shape on F2 stops F5 and F6** (#38). When an edit makes the
+  shape invalid, a red notice says so, no program is made (it used to be made
+  from the last valid shape, which was no longer on screen), saving asks
+  first and says the file gets the last valid shape, and the edit is kept
+  when you visit other screens. **Undo changes** goes back to the last valid
+  shape.
+- **Closing the tool library without saving changes nothing** (#38). Edits
+  used to reach the job's stations straight away. A refused edit (blank or
+  duplicate ID) keeps the list on the tool being edited.
+- **Saving can't lose the job or the old file** (#38). Job files, tool
+  libraries and programs are written to a temporary file and swapped in only
+  when complete. If the USB stick is pulled or full, the old file stays, the
+  job stays open and unsaved, and a message says what happened. Save As to a
+  place that fails leaves the job on its old file.
+- **The subroutine file path is saved as written** (#38). A relative path
+  stays relative (to the job file's folder), so a job folder can be copied to
+  another computer. Save As to another folder re-writes it to name the same
+  file. Older jobs with absolute paths load as before.
+- Opening a job file with a malformed table or segment, a folder, or a
+  binary file is a message naming the place to fix, not a crash; F3 with all
+  32 stations used says so; the STEP/STL import dialog reports kernel errors
+  instead of closing; unexpected errors are logged to
+  `~/.config/omniturn-cam/omniturn-cam.log` and reported as internal errors.
+
 ### G-code output
+- GUI integrity (#38): no change to any program. The GUI no longer makes a
+  program from stale field values or from a shape that isn't the one on
+  screen.
 - Reading programs back (#36): no change to any program omniturn-cam writes
   (golden output unchanged). Programs that used to crash the post (any arc
   with `arc_format = "ik"`) now post. Raw code with characters or numbers the

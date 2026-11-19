@@ -6,14 +6,17 @@ by the fill-in-the-blank front end. See examples/ for the format.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import difflib
+import os
 import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from .fileio import write_text_atomic
 from .gcode import subroutine_numbers
 from .geometry import Arc, Line, Point, Profile
 from .opcheck import operation_issues
@@ -51,13 +54,53 @@ class Job:
     profiles: dict[str, Profile] = field(default_factory=dict)
     operations: list[Operation] = field(default_factory=list)
     description: str = ""
-    include_subs: str | None = None  # file of subroutines appended after M30 (e.g. ZipLoader subs)
+    # File of subroutines appended after M30 (e.g. ZipLoader subs), exactly as
+    # the operator or the job file wrote it: relative paths stay relative, so
+    # a job and its subroutine file can be moved together (issue #38).
+    include_subs: str | None = None
+    # The folder the job file lives in, which a relative include_subs is
+    # relative to. Not saved: it's wherever the file is. None for a job that
+    # hasn't been loaded or saved yet (then relative means the current folder).
+    # field(compare=False) leaves it out of ==, so where a job is stored
+    # doesn't make two identical jobs unequal.
+    base_dir: Path | None = field(default=None, compare=False, repr=False)
+
+    @property
+    def include_path(self) -> Path | None:
+        """The include file to read: include_subs resolved against the job's
+        folder. A property (``job.include_path``, no brackets) because it's
+        worked out from two fields rather than stored, so it can't go stale."""
+        if not self.include_subs:
+            return None
+        p = Path(self.include_subs).expanduser()
+        if not p.is_absolute() and self.base_dir is not None:
+            p = self.base_dir / p
+        return p
+
+    def relocate(self, new_dir: Path) -> None:
+        """The job file is now in ``new_dir`` (Save As). A relative
+        include_subs is re-written relative to the new folder so it still
+        names the same file; an absolute one is left alone. A job that had no
+        folder yet (never saved) keeps a relative path as typed: it can only
+        have meant "next to the job file"."""
+        new_dir = Path(new_dir)
+        moving = self.base_dir is not None and self.base_dir.resolve() != new_dir.resolve()
+        if moving and self.include_subs and not Path(self.include_subs).expanduser().is_absolute():
+            target = self.include_path.resolve()
+            try:
+                self.include_subs = Path(os.path.relpath(target, new_dir.resolve())).as_posix()
+            except ValueError:  # Windows: a different drive has no relative path
+                self.include_subs = str(target)
+        self.base_dir = new_dir
 
     def external_subs(self) -> tuple[str, list[int]]:
-        """Text of the include file and the subroutine numbers it defines."""
+        """Text of the include file and the subroutine numbers it defines.
+
+        Raises OSError if the file can't be read (Job.issues reports a
+        missing file first)."""
         if not self.include_subs:
             return "", []
-        text = Path(self.include_subs).read_text(errors="replace")
+        text = self.include_path.read_text(errors="replace")
         # The shared reader (gcode.py), the same one lint and the backplot
         # use: `}1 (LOADER)` is subroutine 1 here too, and `}01` is 1, so the
         # post never numbers its own contour subroutine onto one of these
@@ -90,8 +133,11 @@ class Job:
             out.append(Issue("job", "must be inch or metric", setting="Units [units]", value=show(self.units)))
             return out
         out += self._stock_issues()
-        if self.include_subs and not Path(self.include_subs).is_file():
-            out.append(Issue("job", f"subroutine file {self.include_subs} not found", setting="Include file"))
+        if self.include_subs and not self.include_path.is_file():
+            where = self.include_subs
+            if str(self.include_path) != self.include_subs:
+                where += f" (looked for {self.include_path})"
+            out.append(Issue("job", f"subroutine file {where} not found", setting="Include file"))
         elif self.include_subs:
             # Each number may be defined only once (p2.55). Lint catches it in
             # the finished program too, but saying so here names the file, and
@@ -184,6 +230,23 @@ def _num(value, where: str) -> float:
     return float(value)
 
 
+def _table(value, where: str) -> dict:
+    """``value`` must be a TOML table (a dict here). A list or a number where
+    a table belongs used to reach ``seg["x"]`` or ``dict(o)`` and raise
+    TypeError, which says nothing about where in the file the problem is
+    (issue #38). This turns it into a ValueError that does."""
+    if not isinstance(value, dict):
+        raise ValueError(f"{where} must be a table like {{ x = ..., z = ... }} or a [section], not {show(value)}")
+    return value
+
+
+def _tables(value, where: str) -> list[dict]:
+    """``value`` must be a list of tables (TOML ``[[name]]`` blocks)."""
+    if not isinstance(value, list):
+        raise ValueError(f"{where} must be a list of [[...]] tables, not {show(value)}")
+    return [_table(v, f"{where} {i}") for i, v in enumerate(value, 1)]
+
+
 def _point(v, where: str) -> Point:
     if isinstance(v, dict):
         if "x" not in v or "z" not in v:
@@ -198,10 +261,11 @@ def _point(v, where: str) -> Point:
 
 def profile_from_dict(name: str, d: dict) -> Profile:
     where = f"shape {name!r}"
+    d = _table(d, where)
     if "start" not in d:
         raise ValueError(f"{where} has no start point")
     prof = Profile(start=_point(d["start"], f"{where} start"), name=name, side=d.get("side", "od"))
-    for i, seg in enumerate(d.get("seg", []), 1):
+    for i, seg in enumerate(_tables(d.get("seg", []), f"{where} segment"), 1):
         here = f"{where} segment {i}"
         last = prof.end
         x = _num(seg["x"], f"{here} x") if "x" in seg else last.x
@@ -269,7 +333,7 @@ def job_from_dict(data: dict, library: ToolLibrary, base_dir: Path | None = None
             f"reads up to format {JOB_FORMAT}. Update omniturn-cam to open it."
         )
     setup = Setup()
-    for i, st in enumerate(data.get("station", []), 1):
+    for i, st in enumerate(_tables(data.get("station", []), "station"), 1):
         t, d = st.get("t"), st.get("d")
         # int() used to be applied here, so t = 1.5 quietly became T1.
         if not is_whole(t):
@@ -280,23 +344,28 @@ def job_from_dict(data: dict, library: ToolLibrary, base_dir: Path | None = None
             raise ValueError(f"station t{t} in the job file has no tool")
         setup.add(Station(t, library[st["tool"]], d))
 
-    profiles = {name: profile_from_dict(name, d) for name, d in data.get("profile", {}).items()}
+    profiles = {name: profile_from_dict(name, d) for name, d in _table(data.get("profile", {}), "[profile]").items()}
 
-    ops = [_op_from_dict(i, o) for i, o in enumerate(data.get("op", []), 1)]
+    ops = [_op_from_dict(i, o) for i, o in enumerate(_tables(data.get("op", []), "operation"), 1)]
 
-    if "stock" not in data or "diameter" not in data["stock"]:
+    if not isinstance(data.get("stock"), dict) or "diameter" not in data["stock"]:
         raise ValueError("the job file has no [stock] diameter")
     if "name" not in j:
         raise ValueError("the job file has no [job] name")
     s = data["stock"]
     inc = j.get("include_subs")
-    if inc and base_dir is not None and not Path(inc).is_absolute():
-        inc = str((base_dir / inc).resolve())
+    if inc is not None and not isinstance(inc, str):
+        raise ValueError(f"[job] include_subs is {show(inc)}: must be a file name in quotes")
+    # Kept exactly as written (issue #38). It used to be turned into an
+    # absolute path here, and saving wrote that back, so a job copied to
+    # another computer still pointed into the first one's folders. The
+    # job's folder (base_dir) is used when the file is read (Job.include_path).
     return Job(
         name=j["name"],
         units=j.get("units", "inch"),
         description=j.get("description", ""),
         include_subs=inc,
+        base_dir=base_dir,
         # The stock values are kept as written and checked by Job.issues():
         # float() here would quietly accept diameter = "1.0".
         stock=Stock(s["diameter"], s.get("length"), s.get("bore"), s.get("material", "")),
@@ -310,12 +379,17 @@ def load_job(path: str | Path, library: ToolLibrary, validate: bool = True) -> J
     """Read a job file. With ``validate`` (the default) also run Job.validate().
 
     Raises ValueError (ValidationError for problems in the values) naming the
-    file, and KeyError for a tool that isn't in the library.
+    file, KeyError for a tool that isn't in the library, and OSError when the
+    file itself can't be read (missing, a folder, no permission). The first
+    two mean "fix the job file", the last "check the file is there"; callers
+    tell the operator differently (gui.app.MainWindow.open_job).
     """
     try:
-        data = tomllib.loads(Path(path).read_text())
+        data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:
         raise ValueError(f"{path} is not a valid job file: {e}") from None
+    except UnicodeDecodeError:
+        raise ValueError(f"{path} is not a job file: it isn't text (TOML)") from None
     job = job_from_dict(data, library, Path(path).parent)
     if validate:
         job.validate()
@@ -355,6 +429,8 @@ def op_to_dict(op: Operation) -> dict:
 
 
 def job_to_dict(job: Job) -> dict:
+    """The job as the dict ``save_job`` writes. include_subs is written as
+    the job holds it (relative stays relative)."""
     return {
         "job": _clean(
             {
@@ -387,7 +463,20 @@ def _tomli_w():
 
 
 def save_job(job: Job, path: str | Path) -> None:
-    Path(path).write_text("# omniturn-cam job file\n" + _tomli_w().dumps(job_to_dict(job), multiline_strings=False))
+    """Write ``job`` to ``path``, atomically (fileio.py): if the write fails
+    the old file is untouched and OSError is raised.
+
+    Saving into a different folder (Save As) re-expresses a relative
+    include_subs from the new folder, so it still names the same file; after
+    a successful write the job's base_dir is the new folder. Nothing changes
+    in ``job`` if the write fails.
+    """
+    path = Path(path)
+    moved = copy.copy(job)  # a shallow copy: only include_subs/base_dir differ
+    moved.relocate(path.parent)
+    text = "# omniturn-cam job file\n" + _tomli_w().dumps(job_to_dict(moved), multiline_strings=False)
+    write_text_atomic(path, text)
+    job.include_subs, job.base_dir = moved.include_subs, moved.base_dir
 
 
 def profiles_toml(profiles: dict[str, Profile]) -> str:
@@ -399,4 +488,4 @@ def merge_profiles(path: str | Path, profiles: dict[str, Profile]) -> None:
     """Add or replace profiles in an existing job file, keeping everything else."""
     data = tomllib.loads(Path(path).read_text())
     data.setdefault("profile", {}).update({k: profile_to_dict(v) for k, v in profiles.items()})
-    Path(path).write_text("# omniturn-cam job file\n" + _tomli_w().dumps(data))
+    write_text_atomic(path, "# omniturn-cam job file\n" + _tomli_w().dumps(data))

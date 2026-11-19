@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -21,8 +22,17 @@ from PySide6.QtWidgets import (
 from ..backplot import draw_profile
 from .widgets import PlotCanvas, fmt_num
 
+log = logging.getLogger("omniturn_cam.gui")
+
 
 class StepImportDialog(QDialog):
+    """Preview a model import and choose its options.
+
+    ``import_result`` holds the ImportResult for the current choices, or None
+    when the import failed. (It was called ``result``, which hid QDialog's
+    own ``result()`` method, the accepted/rejected code, on this object.)
+    """
+
     def __init__(self, path: str, job, parent=None):
         super().__init__(parent)
         from ..modelimport import is_mesh, list_bodies
@@ -30,7 +40,7 @@ class StepImportDialog(QDialog):
         self.setWindowTitle(f"Import shape - {Path(path).name}")
         self.resize(1000, 640)
         self.path, self.job = path, job
-        self.result = None
+        self.import_result = None
         self.solids = list_bodies(path)
         self.mesh = is_mesh(path)
 
@@ -88,13 +98,24 @@ class StepImportDialog(QDialog):
 
         self.notes.clear()
         try:
-            self.result = import_model(self.path, self.solid.currentData(), self.job.units, self.flip.isChecked())
-        except StepImportError as e:
-            self.result = None
-            self.canvas.message(str(e))
-            self.ok.setEnabled(False)
+            self.import_result = import_model(
+                self.path, self.solid.currentData(), self.job.units, self.flip.isChecked()
+            )
+        except StepImportError as e:  # the model isn't a turned part we can read: expected
+            self._failed(str(e))
             return
-        r = self.result
+        except Exception as e:
+            # Anything else is the geometry kernel or our import code failing
+            # on this model: a bug, or a model nobody tried yet. Logged with
+            # the traceback for whoever fixes it, shown to the operator, and
+            # Import stays off. Not hidden, and not allowed to take down F2.
+            log.error("importing %s failed", self.path, exc_info=True)
+            self._failed(
+                f"Couldn't import this model ({type(e).__name__}: {e}). "
+                "This is a problem in omniturn-cam or the geometry kernel; details are in the log."
+            )
+            return
+        r = self.import_result
         self.ok.setEnabled(True)
         unit = "in" if self.job.units == "inch" else "mm"
         self.info.setText(
@@ -119,11 +140,18 @@ class StepImportDialog(QDialog):
         ax.set_title("OD blue   ID purple   Z0 face green", fontsize=9)
         self.canvas.draw_idle()
 
+    def _failed(self, message: str) -> None:
+        self.import_result = None
+        self.canvas.message(message)
+        self.info.setText("")
+        self.replace_note.setText("")
+        self.ok.setEnabled(False)
+
     def apply(self):
         """Put the imported shapes into the job. Returns the names added."""
         from ..stepimport import extend_to_stock
 
-        r = self.result
+        r = self.import_result
         if self.set_stock.isChecked():
             self.job.stock.diameter = r.max_dia
         if self.extend.isChecked():

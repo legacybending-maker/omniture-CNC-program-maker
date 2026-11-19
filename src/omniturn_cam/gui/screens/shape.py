@@ -1,7 +1,31 @@
-"""F2 Part shape: the OD/ID profile table and its preview."""
+"""F2 Part shape: the OD/ID profile table and its preview.
+
+Invalid edits (issue #38)
+-------------------------
+The table is what the operator types; ``job.profiles`` is what the program is
+made from. They are the same only while the table holds a valid shape. When
+an edit makes it invalid (an arc too small for its chord, a letter where a
+number goes), the table can't be turned into a Profile, so the job still has
+the last valid one. That gap used to be invisible: F6 made a program from a
+shape that was no longer on screen.
+
+Now the gap is explicit state: ``self.problem`` says what's wrong while the
+table and the job differ. While it is set:
+
+* a red notice above the table says the program uses neither, and an
+  "Undo changes" button puts the last valid shape back in the table;
+* ``blocking_problem()`` returns it, so MainWindow makes no program (F5, F6)
+  and asks before saving the last valid shape (F7);
+* the table is kept as typed when the operator visits other screens, and
+  actions that would reload it from the job (another shape, New, Rename,
+  Delete, Import, Move) are refused rather than throwing the edit away;
+* the preview shows the problem, not the old shape.
+"""
 
 from __future__ import annotations
 
+import logging
+import math
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -17,7 +41,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSplitter,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -25,8 +48,10 @@ from PySide6.QtWidgets import (
 
 from ...backplot import draw_profile
 from ...geometry import Arc, Line, Point, Profile
-from ..widgets import UNIT_SUFFIX, NumberEdit, PlotCanvas, fmt_num
+from ..widgets import UNIT_SUFFIX, EditTable, NumberEdit, PlotCanvas, fmt_num
 from .base import Screen, _buttons
+
+log = logging.getLogger("omniturn_cam.gui")
 
 COLS = ["Type", "X (dia)", "Z", "Corner", "Size", "Arc R", "Arc dir"]
 
@@ -38,6 +63,11 @@ class ShapeScreen(Screen):
         super().__init__(win)
         self.current: str | None = None
         self._loading = False
+        # What's wrong with the table while it differs from the job's shape
+        # (see the module docstring), and which job it belongs to: a new or
+        # opened job starts clean.
+        self.problem: str | None = None
+        self._problem_job = None
         lay = QVBoxLayout(self)
 
         top = QHBoxLayout()
@@ -58,11 +88,11 @@ class ShapeScreen(Screen):
         top.addWidget(self.side)
         top.addSpacing(20)
         top.addWidget(QLabel("Start X"))
-        self.sx = NumberEdit()
+        self.sx = NumberEdit(label="Shape start X")
         self.sx.valueChanged.connect(lambda _v: self._rebuild())
         top.addWidget(self.sx)
         top.addWidget(QLabel("Start Z"))
-        self.sz = NumberEdit()
+        self.sz = NumberEdit(label="Shape start Z")
         self.sz.valueChanged.connect(lambda _v: self._rebuild())
         top.addWidget(self.sz)
         top.addStretch(1)
@@ -76,7 +106,21 @@ class ShapeScreen(Screen):
         left = QWidget()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
-        self.table = QTableWidget(0, len(COLS))
+        alert_row = QHBoxLayout()
+        self.alert = QLabel("")
+        self.alert.setWordWrap(True)
+        self.alert.setStyleSheet("background:#b00020; color:white; padding:6px; font-weight:600;")
+        alert_row.addWidget(self.alert, 1)
+        self.undo = QPushButton("Undo changes")
+        self.undo.setToolTip("Put the last valid shape back in the table")
+        self.undo.clicked.connect(self._revert)
+        alert_row.addWidget(self.undo)
+        ll.addLayout(alert_row)
+        self.alert.hide()
+        self.undo.hide()
+        # EditTable (widgets.py): a cell still being typed in is committed
+        # before any F-key, like every other field.
+        self.table = EditTable(0, len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -147,9 +191,19 @@ class ShapeScreen(Screen):
         self._loading = False
 
     def _cell(self, r, c):
+        """The number in a cell; None if blank. Raises ValueError naming the
+        row and column for anything else, so the notice says where to look."""
         it = self.table.item(r, c)
         txt = it.text().strip() if it else ""
-        return float(txt) if txt else None
+        if not txt:
+            return None
+        try:
+            v = float(txt)
+        except ValueError:
+            raise ValueError(f"row {r + 1} {COLS[c]}: {txt!r} isn't a number") from None
+        if not math.isfinite(v):
+            raise ValueError(f"row {r + 1} {COLS[c]}: {txt!r} isn't a finite number")
+        return v
 
     def _rebuild(self):
         if self._loading or self.current is None:
@@ -174,12 +228,59 @@ class ShapeScreen(Screen):
                     prof.segments.append(Line(end, size if corner == "C" else None, size if corner == "R" else None))
             prof.validate()
         except ValueError as e:
-            self.msg.setText(f"<span style='color:#b00'>{e}</span>")
+            self._set_problem(str(e))
+            # The table differs from the saved job now, whatever the job holds.
+            self.win.touched()
             return
         self.job.profiles[self.current] = prof
+        self._set_problem(None)
         self.msg.setText(f"<span style='color:#2e7d32'>Shape OK - {len(prof.segments)} elements</span>")
         self.win.touched()
         self._draw()
+
+    # ---------------------------------------------------------------- invalid-edit state
+    def _set_problem(self, problem: str | None) -> None:
+        self.problem = problem
+        self._problem_job = self.job if problem else None
+        if problem:
+            self.alert.setText(
+                f"This shape isn't valid: {problem}. Until it is, F5 and F6 make no program "
+                f"(the job still holds the last valid shape, not this one)."
+            )
+            self.msg.setText(f"<span style='color:#b00'>{problem}</span>")
+            self.canvas.message(f"{problem}\n\nNot drawn: fix the table, or Undo changes.")
+        self.alert.setVisible(bool(problem))
+        self.undo.setVisible(bool(problem))
+
+    def _pending(self) -> bool:
+        """True while the table holds an invalid edit for the current job."""
+        return self.problem is not None and self._problem_job is self.job
+
+    def blocking_problem(self) -> str | None:
+        if not self._pending():
+            return None
+        return (
+            f"Shape {self.current!r} on F2 isn't valid: {self.problem}. The table shows your edit, "
+            "but the job still holds the last valid shape. Fix the table, or press Undo changes on F2."
+        )
+
+    def _refuse_while_invalid(self, action: str) -> bool:
+        """True (and the operator told why) if ``action`` would reload the
+        table from the job and so throw the invalid edit away."""
+        if not self._pending():
+            return False
+        self.win.notify(
+            "Part shape",
+            f"Can't {action} while shape {self.current!r} has an edit that isn't valid:\n\n"
+            f"{self.problem}\n\nFix it, or press Undo changes to go back to the last valid shape.",
+        )
+        return True
+
+    def _revert(self):
+        """Undo changes: the table goes back to the job's (last valid) shape."""
+        self._set_problem(None)
+        self._load(self.current)
+        self.msg.setText("<span style='color:#2e7d32'>Back to the last valid shape</span>")
 
     def _load(self, name):
         self.current = name
@@ -203,6 +304,8 @@ class ShapeScreen(Screen):
         self._draw()
 
     def _draw(self):
+        if self._pending():
+            return  # the problem is on the canvas; the old shape isn't what's on screen
         prof = self.job.profiles.get(self.current) if self.current else None
         if prof is None:
             self.canvas.message("No shape yet - press New", "#667")
@@ -218,12 +321,19 @@ class ShapeScreen(Screen):
     # ---------------------------------------------------------------- actions
     def _pick(self, name):
         if name and name != self.current:
+            if self._refuse_while_invalid("switch to another shape"):
+                self.pick.blockSignals(True)
+                self.pick.setCurrentText(self.current)
+                self.pick.blockSignals(False)
+                return
             self._load(name)
 
     def _side(self, _s):
         self._rebuild()
 
     def _import_step(self):
+        if self._refuse_while_invalid("import shapes"):
+            return
         start = self.win.settings.value("step_dir", str(Path.home()))
         from ...modelimport import MODEL_FILTER
 
@@ -237,15 +347,18 @@ class ShapeScreen(Screen):
             from ..stepdialog import StepImportDialog
 
             dlg = StepImportDialog(path, self.job, self)
-        except Exception as e:  # missing OCP, unreadable file
-            QMessageBox.critical(self, "Import shape", str(e))
+        except Exception as e:  # missing kernel, unreadable or unsupported file
+            log.warning("opening %s for import failed", path, exc_info=True)
+            QMessageBox.critical(self, "Import shape", f"Couldn't open {Path(path).name} for import:\n{e}")
             return
-        if dlg.exec() == QDialog.Accepted and dlg.result is not None:
+        if dlg.exec() == QDialog.Accepted and dlg.import_result is not None:
             names = dlg.apply()
             self.win.touched()
             self.refresh(select=names[0])
 
     def _new(self):
+        if self._refuse_while_invalid("start a new shape"):
+            return
         name, ok = QInputDialog.getText(self, "New shape", "Shape name (e.g. od, bore):")
         if ok and name.strip():
             name = name.strip()
@@ -257,7 +370,7 @@ class ShapeScreen(Screen):
             self.refresh(select=name)
 
     def _rename(self):
-        if not self.current:
+        if not self.current or self._refuse_while_invalid("rename the shape"):
             return
         name, ok = QInputDialog.getText(self, "Rename shape", "New name:", text=self.current)
         name = name.strip()
@@ -271,7 +384,7 @@ class ShapeScreen(Screen):
             self.refresh(select=name)
 
     def _delete(self):
-        if not self.current:
+        if not self.current or self._refuse_while_invalid("delete the shape"):
             return
         users = [i + 1 for i, op in enumerate(self.job.operations) if getattr(op, "profile", None) == self.current]
         if users:
@@ -300,6 +413,9 @@ class ShapeScreen(Screen):
             self._rebuild()
 
     def _move(self, d):
+        # Moving swaps segments in the job's shape and reloads the table.
+        if self._refuse_while_invalid("move rows"):
+            return
         prof = self.job.profiles.get(self.current)
         r = self.table.currentRow()
         if prof is None or not (0 <= r < len(prof.segments)) or not (0 <= r + d < len(prof.segments)):
@@ -310,6 +426,15 @@ class ShapeScreen(Screen):
         self._rebuild()
 
     def refresh(self, select=None):
+        if self._problem_job is not None and self._problem_job is not self.job:
+            self._set_problem(None)  # a different job was opened: its shapes start clean
+        if self._pending() and select in (None, self.current):
+            # Coming back to F2 with an invalid edit: keep the table as typed.
+            # Reloading it from the job would quietly throw the edit away.
+            suf = UNIT_SUFFIX[self.job.units]
+            self.sx.setSuffix(suf["dia"])
+            self.sz.setSuffix(suf["z"])
+            return
         names = sorted(self.job.profiles)
         self.pick.blockSignals(True)
         self.pick.clear()
