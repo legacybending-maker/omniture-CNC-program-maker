@@ -18,6 +18,7 @@ from ..geometry import Arc, Point, Profile
 from ..job import Job
 from ..operations import Operation, spec_for
 from ..operations.base import ENDS_AT
+from ..operations.face import Face
 from ..tools import Station
 from ..validation import Issue, ValidationError, format_issues, show, type_issues
 from .external import analyse, subroutine_bodies
@@ -311,6 +312,7 @@ class OmniTurnPost:
             return
         except ProgramError as e:
             raise PostError(f"the generated program can't be read back: {e}") from None
+        self.check_stock_length(paths)
         pts = [q for path in paths for q in path.points()]
         if not pts:
             return
@@ -324,6 +326,81 @@ class OmniTurnPost:
             self.warn(
                 f"program moves {x_span:.3f} in X (radial) but the {self.m.name} has {self.m.x_travel:g} of X travel"
             )
+
+    def bar_end_z(self) -> float:
+        """Where the end of the bar is before any cutting, as far as the job says.
+
+        The job's Z0 is the finished face (README, "which end is the face").
+        A Face operation with face stock starts that far in front of its Z, so
+        the bar end is the highest ``z + stock`` of the Face operations; with
+        none, the bar end is taken to be Z0. That is a **setup assumption**,
+        not something the post can see: it's printed in every warning that
+        relies on it.
+        """
+        ends = [op.z + op.stock for op in self.job.operations if isinstance(op, Face)]
+        # max() of an empty list raises, so `default=` gives the Z0 case.
+        return max(ends, default=0.0)
+
+    def check_stock_length(self, paths) -> None:
+        """Warn when a tool's programmed Z reaches the collet face.
+
+        F1's *Length out of collet* (``Stock.length``) says how far the bar
+        sticks out. With the bar end at ``bar_end_z()``, the collet face is
+        about ``length`` behind it. Any tool whose programmed point goes that
+        deep would be cutting the collet, or the bar inside it.
+
+        What this is and isn't, so nobody mistakes it for a collision check:
+
+        * **Known:** every programmed Z, read back from the finished program
+          by the backplot (canned cycles and contour subroutines included),
+          grouped by tool.
+        * **Assumed:** where the bar end is (``bar_end_z``) and that the
+          length was measured from it to the collet face.
+        * **Not modelled:** tool holders, boring bar shanks, the drill's
+          point length, which side of a blade is its reference edge, and the
+          tool offsets. A program can pass this check and still hit.
+
+        So it only ever warns. ``paths`` is the backplot's list of Paths;
+        each knows its tool.
+        """
+        length = self.job.stock.length
+        if not length:
+            return  # left blank on F1: nothing to compare against, say nothing
+        end = self.bar_end_z()
+        collet = end - length
+        # The deepest Z each tool's programmed point reaches, in a dict keyed
+        # by tool number. dict.get(key, default) returns the default when the
+        # key isn't there yet, so a tool's first point starts its minimum.
+        deepest: dict[int, float] = {}
+        for path in paths:
+            if path.tool is None:
+                continue  # moves before the first tool call: no tool to blame
+            for z, _x in path.points():
+                deepest[path.tool] = min(z, deepest.get(path.tool, z))
+        where = f"with the bar end at Z{self.n(end)} and {length:g} out of the collet"
+        for t in sorted(deepest):
+            z = deepest[t]
+            if z <= collet + 1e-9:
+                self.warn(
+                    f"t{t} goes to Z{self.n(z)}, at or past the collet face (about Z{self.n(collet)} {where}). "
+                    "Check the length out of the collet on F1 and the program on F4 Verify. This compares "
+                    "programmed Z only: holders and offsets aren't modelled"
+                )
+                continue
+            # .get() rather than setup[t]: a T word in raw code may name a
+            # station the job doesn't have, and that's not this check's error.
+            station = self.job.setup.stations.get(t)
+            width = station.tool.width if station is not None else None
+            if width and z - width <= collet + 1e-9:
+                # A grooving or cutoff blade is programmed at one edge. If
+                # that's the edge nearer the face, the other edge is `width`
+                # nearer the collet. The post doesn't know which edge it is,
+                # so this is a conditional warning, worded as one.
+                self.warn(
+                    f"t{t} goes to Z{self.n(z)}; its blade is {width:g} wide, so if Z is the face-side edge "
+                    f"the other edge reaches Z{self.n(z - width)}, at or past the collet face "
+                    f"(about Z{self.n(collet)} {where})"
+                )
 
     def next_sub(self) -> int:
         taken = set(self.subs.values()) | set(self.external_nums)
@@ -576,6 +653,19 @@ class OmniTurnPost:
         """M05, recorded: the next spindle_on restarts it with M03/M04."""
         self.emit("m05")
         self.state.spindle = "m05"
+
+    def stop_coolant(self) -> None:
+        """M09, recorded, unless the post already *knows* coolant is off.
+
+        Recording it is the point: if the post wrote M09 but still believed
+        coolant was on, the next operation's ``spindle_on`` would skip the M08
+        and cut dry. With the state saying "m09", ``spindle_on`` writes M08
+        for the next operation that wants coolant. An UNKNOWN coolant state
+        is turned off too: "don't know" is not "off".
+        """
+        if self.state.coolant != "m09":
+            self.emit("m09")
+            self.state.coolant = "m09"
 
     def set_comp(self, code: str) -> None:
         """Write G40/G41/G42 and record it, so the state always knows whether comp is on."""

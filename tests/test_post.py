@@ -158,7 +158,9 @@ def test_releasing_die_head_dwells_retracts_and_stops_for_reset(lib):
     assert op.stop_after == "m01" and op.sync and op.dwell == 0.2
     code = post(_job_with(lib, (3, "die-head-1-2-20"), ops=[op]))
     tail = code.split("g95f.05z-.5p\n", 1)[1].split("\n")
-    assert tail[:5] == ["g04f.2", "g00z.1", "z1", "m05", "m01"]
+    # Stage 5: m09 after the m05, so coolant isn't running while the operator
+    # resets the head (M01 leaves M functions on, p2.53).
+    assert tail[:6] == ["g04f.2", "g00z.1", "z1", "m05", "m09", "m01"]
 
 
 def test_g74_box_rough_always_carries_u(lib):
