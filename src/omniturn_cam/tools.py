@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
+from .fileio import write_text_atomic
 from .validation import Issue, ValidationError, is_finite, show, type_issues
 
 # What the tool is. Screw-machine tooling is first-class, not an afterthought.
@@ -236,7 +237,8 @@ class ToolLibrary:
                 if k not in d and v is not None:
                     d[k] = v
             out.append(d)
-        path.write_text("# omniturn-cam tool library\n" + tomli_w.dumps({"tool": out}))
+        # Atomic (fileio.py): a failed save leaves the old library intact.
+        write_text_atomic(path, "# omniturn-cam tool library\n" + tomli_w.dumps({"tool": out}))
 
 
 @dataclass

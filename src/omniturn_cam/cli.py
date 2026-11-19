@@ -13,6 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .fileio import write_bytes_atomic
 from .job import load_job
 from .lint import lint
 from .post import MachineConfig, PostError, post
@@ -131,7 +132,12 @@ def main(argv=None) -> int:
             sys.stdout.write(code)
         else:
             out = Path(a.output) if a.output else Path(a.job).with_name(job.name + ".cnc")
-            out.write_bytes(code.replace("\n", "\r\n").encode("ascii"))  # DOS line endings
+            try:
+                # DOS line endings; atomic, so a failed write leaves no half program (fileio.py).
+                write_bytes_atomic(out, code.replace("\n", "\r\n").encode("ascii"))
+            except OSError as e:
+                print(f"error: can't write {out}: {e.strerror or e}", file=sys.stderr)
+                return 2
             print(f"wrote {out}")
         if a.plot:
             from .backplot import plot
